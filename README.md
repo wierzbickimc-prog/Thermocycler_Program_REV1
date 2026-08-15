@@ -21,6 +21,19 @@ python serve.py --port 9000 --no-browser
 Stdlib only — no Flask/FastAPI. Live state reaches the browser over Server-Sent
 Events; the page is a small ES-module SPA under `web/`.
 
+## Interface gallery
+
+<table>
+  <tr>
+    <td width="50%"><strong>Instrument fleet</strong><br><img src="docs/screenshots/fleet-overview.png" alt="Fleet overview showing three simulated thermocyclers"></td>
+    <td width="50%"><strong>Device controls and profile editor</strong><br><img src="docs/screenshots/device-profile.png" alt="Thermocycler device controls and PCR profile editor"></td>
+  </tr>
+  <tr>
+    <td width="50%"><strong>Profile administration</strong><br><img src="docs/screenshots/profile-administration.png" alt="Administration screen for standard PCR profiles"></td>
+    <td width="50%"><strong>Thermal QC</strong><br><img src="docs/screenshots/thermal-qc.png" alt="Thermal quality control setup interface"></td>
+  </tr>
+</table>
+
 - **Instrument grid** — every connected thermocycler on one screen with live
   block/lid temperatures, run progress and lid state. Click a card to open it.
 - **Animated instrument** — an isometric SVG of the module that reflects real
@@ -34,7 +47,10 @@ Events; the page is a small ES-module SPA under `web/`.
   `~/.builtdna/profiles/`.
 - **Profile editor** — click any value in the stage table to edit it; add,
   duplicate, delete and reorder stages and steps; Save, or Save as… to fork a
-  read-only preset. Built-in presets cannot be overwritten.
+  read-only preset. Profiles define whether the lid must be open or closed;
+  starting a mismatched profile offers to move the lid and waits for the module
+  to confirm its position. Built-in presets cannot be overwritten, but they can
+  be deactivated in the profile manager to hide them from instrument dropdowns.
 - **Busy-machine guard** — starting a run on an instrument that is already
   running or holding a target asks for confirmation first and lists exactly what
   it is doing before overriding.

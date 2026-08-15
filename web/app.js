@@ -207,18 +207,23 @@ function renderProfiles() {
   function paint() {
     const rows = profiles.map(p => {
       const steps = p.stages.reduce((n, s) => n + s.cycles * s.steps.length, 0);
+      const active = p.active !== false;
       return `
-      <div class="prof-row" data-id="${esc(p.id)}">
+      <div class="prof-row${active ? "" : " inactive"}" data-id="${esc(p.id)}">
         <div style="flex:1">
           <b>${esc(p.name)}</b>
           <span class="tag ${p.builtin ? "tag-std" : "tag-user"}">${p.builtin ? "standard" : "saved"}</span>
+          ${active ? "" : '<span class="tag tag-off">inactive</span>'}
           <div class="meta">${p.stages.length} stages · ${steps} steps ·
-            lid ${p.lid_temp ?? "—"} °C${p.preheat_lid ? " · preheat" : ""}${
+            lid ${p.lid_position || "closed"} · heated lid ${p.lid_temp ?? "off"}${
+              p.lid_temp == null ? "" : " °C"}${p.preheat_lid ? " · preheat" : ""}${
               p.note ? ` · ${esc(p.note)}` : ""}</div>
         </div>
-        <button class="btn btn-sm" data-open>Edit</button>
+        <button class="btn btn-sm" data-open${active ? "" : ' disabled title="Activate this profile to edit it"'}>Edit</button>
         <button class="btn btn-sm" data-dup>Duplicate</button>
-        ${p.builtin ? "" : `<button class="btn btn-sm" data-ren>Rename</button>
+        ${p.builtin
+          ? `<button class="btn btn-sm${active ? " btn-danger" : ""}" data-toggle>${active ? "Deactivate" : "Activate"}</button>`
+          : `<button class="btn btn-sm" data-ren>Rename</button>
                             <button class="btn btn-sm btn-danger" data-del>Delete</button>`}
       </div>`;
     }).join("");
@@ -229,7 +234,7 @@ function renderProfiles() {
           <button class="btn btn-sm" id="back">← All instruments</button>
           <div style="flex:1">
             <h2>Profiles</h2>
-            <p>Standard presets are read-only. Duplicate one to make it editable.</p>
+            <p>Standard presets are read-only. Deactivate one to hide it from instrument dropdowns.</p>
           </div>
         </div>
         <div class="prof-list">${rows}</div>
@@ -258,6 +263,22 @@ function renderProfiles() {
           paint();
           toast(`Created “${name}”`);
         } catch (e) { toast(e.message, true); }
+      };
+      const toggle = row.querySelector("[data-toggle]");
+      if (toggle) toggle.onclick = async () => {
+        const next = p.active === false;
+        toggle.disabled = true;
+        try {
+          await api(`/api/profiles/${encodeURIComponent(id)}/active`, {
+            method: "POST", body: JSON.stringify({ active: next }),
+          });
+          await loadProfiles();
+          if (!next && sourceId === id) {
+            current = null; sourceId = null; dirty = false;
+          }
+          paint();
+          toast(`${p.name} ${next ? "activated" : "deactivated"}`);
+        } catch (e) { toast(e.message, true); toggle.disabled = false; }
       };
       const ren = row.querySelector("[data-ren]");
       if (ren) ren.onclick = async () => {
@@ -386,6 +407,15 @@ function renderControl(id, initialTab = "profile") {
               </div>
               <p id="prof-note" style="color:var(--ink-muted);font-size:12px;margin:2px 0 0"></p>
 
+              <div class="field profile-lid-option">
+                <label for="prof-lid-position">Required lid position</label>
+                <select id="prof-lid-position" style="width:150px">
+                  <option value="closed">Closed</option>
+                  <option value="open">Open</option>
+                </select>
+              </div>
+              <p id="prof-lid-hint" class="profile-option-hint"></p>
+
               <div class="toolbar">
                 <button class="btn btn-sm" id="add-stage">+ Stage</button>
                 <button class="btn btn-sm" id="add-step">+ Step</button>
@@ -473,15 +503,29 @@ function renderControl(id, initialTab = "profile") {
   document.getElementById("stop-btn").onclick = () => act(id, "stop_run");
 
   // ---- run, with a busy-machine guard -----------------------------------
+  let preparingLid = false;
+
+  async function waitForLid(required, timeoutMs = 20000) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const fresh = await api(`/api/device/${encodeURIComponent(id)}`);
+      if (!fresh.connected) throw new Error("Instrument disconnected while moving the lid.");
+      if (fresh.lid_status === required) return true;
+      await new Promise(r => setTimeout(r, 300));
+    }
+    return false;
+  }
+
   document.getElementById("run-btn").onclick = async () => {
     if (!current) return toast("Choose a profile first", true);
+    const profileToRun = clone(current);  // lock the choice while the lid moves
     const d = deviceById(id);
     if (!d) return;
     const reasons = busyReasons(d);
     if (reasons.length) {
       const ok = await confirmDialog({
         title: "This instrument is in use",
-        body: `${d.name} is not idle. Starting “${current.name}” will stop whatever ` +
+        body: `${d.name} is not idle. Starting “${profileToRun.name}” will stop whatever ` +
               `it is doing now and take over the block and lid.`,
         points: reasons,
         ok: "Override and run",
@@ -494,8 +538,40 @@ function renderControl(id, initialTab = "profile") {
         await new Promise(r => setTimeout(r, 400));   // let the abort land first
       }
     }
+    const required = profileToRun.lid_position || "closed";
+    const live = deviceById(id);
+    if (live.lid_status !== required) {
+      const closing = required === "closed";
+      const ok = await confirmDialog({
+        title: `${closing ? "Close" : "Open"} lid before starting?`,
+        body: `“${profileToRun.name}” requires the lid ${required}, but it is currently ` +
+              `${live.lid_status}. The run will wait until the instrument reports ` +
+              `the lid ${required}.`,
+        ok: `${closing ? "Close" : "Open"} lid and start`,
+        cancel: "Cancel run",
+      });
+      if (!ok) return;
+
+      const runButton = document.getElementById("run-btn");
+      preparingLid = true;
+      runButton.textContent = closing ? "Closing lid…" : "Opening lid…";
+      paint();
+      try {
+        await act(id, closing ? "close_lid" : "open_lid");
+        if (!await waitForLid(required)) {
+          return toast(`Lid did not report ${required}; profile was not started.`, true);
+        }
+      } catch (e) {
+        return toast(e.message, true);
+      } finally {
+        preparingLid = false;
+        runButton.textContent = "▶ Run profile";
+        paint();
+      }
+    }
+
     if (dirty) toast("Running unsaved edits — save the profile to keep them.");
-    act(id, "run_profile", { profile: current });
+    await act(id, "run_profile", { profile: profileToRun });
   };
 
   // ---- rename instrument -------------------------------------------------
@@ -513,15 +589,31 @@ function renderControl(id, initialTab = "profile") {
 
   // ---- profile select ----------------------------------------------------
   const select = document.getElementById("prof-select");
+  const lidPositionSelect = document.getElementById("prof-lid-position");
+  lidPositionSelect.onchange = () => {
+    if (!current) return;
+    current.lid_position = lidPositionSelect.value;
+    if (current.lid_position === "open") {
+      current.lid_temp = null;
+      current.preheat_lid = false;
+    } else if (current.lid_temp == null) {
+      current.lid_temp = 105;
+      current.preheat_lid = true;
+    }
+    markDirty();
+  };
   function fillProfiles() {
-    const builtin = profiles.filter(p => p.builtin);
-    const saved = profiles.filter(p => !p.builtin);
-    select.innerHTML =
-      `<optgroup label="Standard">${builtin.map(p =>
-        `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join("")}</optgroup>` +
-      (saved.length ? `<optgroup label="Saved">${saved.map(p =>
-        `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join("")}</optgroup>` : "");
-    if (sourceId) select.value = sourceId;
+    const active = profiles.filter(p => p.active !== false);
+    const builtin = active.filter(p => p.builtin);
+    const saved = active.filter(p => !p.builtin);
+    select.disabled = active.length === 0;
+    select.innerHTML = active.length ?
+      ((builtin.length ? `<optgroup label="Standard">${builtin.map(p =>
+          `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join("")}</optgroup>` : "") +
+       (saved.length ? `<optgroup label="Saved">${saved.map(p =>
+          `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join("")}</optgroup>` : "")) :
+      '<option selected disabled>No active profiles</option>';
+    if (sourceId && active.some(p => p.id === sourceId)) select.value = sourceId;
   }
   select.onchange = async () => {
     if (dirty) {
@@ -592,6 +684,11 @@ function renderControl(id, initialTab = "profile") {
 
     note.innerHTML = (current.note ? esc(current.note) : "") +
       (dirty ? '<span class="dirty-dot" title="unsaved changes"></span>' : "");
+    const lidPosition = current.lid_position || "closed";
+    lidPositionSelect.value = lidPosition;
+    document.getElementById("prof-lid-hint").textContent = lidPosition === "open"
+      ? "The heated lid stays off. Starting waits until the lid reports open."
+      : "Starting waits until the lid reports closed.";
 
     let base = 0;
     current.stages.forEach((stage, i) => {
@@ -805,7 +902,7 @@ function renderControl(id, initialTab = "profile") {
     document.getElementById("c-lid-t").textContent =
       d.lid_target != null ? `target ${fmtTemp(d.lid_target)}${u}` : "no target";
     document.getElementById("run-status").textContent = d.run_label;
-    document.getElementById("run-btn").disabled = !d.connected;
+    document.getElementById("run-btn").disabled = !d.connected || preparingLid;
     document.getElementById("stop-btn").disabled = !d.running;
     document.getElementById("run-bar").style.width =
       d.running && d.step_total ? `${(d.step_index / d.step_total) * 100}%` : "0";
@@ -825,7 +922,10 @@ function renderControl(id, initialTab = "profile") {
     }
   }
 
-  if (!current) selectProfile(profiles[0] && profiles[0].id);
+  if (!current) {
+    const firstActive = profiles.find(p => p.active !== false);
+    selectProfile(firstActive && firstActive.id);
+  }
   fillProfiles();
   paintProfile();
   if (initialTab !== "profile") showTab(initialTab);

@@ -16,6 +16,15 @@ const FACE = { a: [48, 118], b: [160, 84], c: [272, 118], d: [160, 152] };
 const WELLS = { a: [72, 117], b: [160, 90], c: [248, 117], d: [160, 144] };
 const ROWS = 8, COLS = 12;
 
+// OSHA treats any contact-burn risk as a hazardous hot surface but does not
+// prescribe one universal numeric cutoff.  60 C / 140 F is the conventional
+// hot-surface warning threshold used here; actual risk also depends on the
+// material and contact duration (see OSHA's ASTM C1055 guidance).
+export const HOT_SURFACE_C = 60;
+export const isHotSurface = t => Number.isFinite(t) && t >= HOT_SURFACE_C;
+export const COLD_SURFACE_C = 15;
+export const isColdSurface = t => Number.isFinite(t) && t < COLD_SURFACE_C;
+
 const el = (name, attrs = {}) => {
   const node = document.createElementNS(NS, name);
   for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
@@ -87,6 +96,10 @@ export function createCycler(host, { compact = false } = {}) {
     <filter id="glow-${uid}" x="-60%" y="-60%" width="220%" height="220%">
       <feGaussianBlur stdDeviation="7" result="b"/>
       <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="temperature-glow-${uid}" x="-80%" y="-80%" width="260%" height="260%">
+      <feGaussianBlur stdDeviation="5.5" result="temperature-blur"/>
+      <feMerge><feMergeNode in="temperature-blur"/><feMergeNode in="SourceGraphic"/></feMerge>
     </filter>`;
   svg.appendChild(defs);
 
@@ -134,6 +147,24 @@ export function createCycler(host, { compact = false } = {}) {
   }
   svg.appendChild(wellGroup);
 
+  // Temperature warning outline for the block. It is separate from the
+  // ordinary tint so the safety state never relies on a subtle hue shift.
+  const blockTemperatureGlow = el("g", { class: "temperature-surface-glow" });
+  const temperatureOutline = {
+    fill: "none", stroke: "currentColor", "stroke-width": 3.2,
+    "stroke-linejoin": "round", filter: `url(#temperature-glow-${uid})`,
+  };
+  blockTemperatureGlow.appendChild(el("polygon", {
+    ...temperatureOutline, points: pts(FACE.a, FACE.b, FACE.c, FACE.d),
+  }));
+  blockTemperatureGlow.appendChild(el("polygon", {
+    ...temperatureOutline, points: pts(FACE.a, FACE.d, [160, 196], [48, 162]),
+  }));
+  blockTemperatureGlow.appendChild(el("polygon", {
+    ...temperatureOutline, points: pts(FACE.d, FACE.c, [272, 162], [160, 196]),
+  }));
+  svg.appendChild(blockTemperatureGlow);
+
   // ---- lid ---------------------------------------------------------------
   // Hinged along the back-left edge (FACE.a -> FACE.b); the whole group
   // rotates about that edge's midpoint, which reads as the lid swinging up.
@@ -172,6 +203,17 @@ export function createCycler(host, { compact = false } = {}) {
     points: pts([la[0] + 26, la[1]], [lb[0], lb[1] + 8], [lc[0] - 26, lc[1]], [ld[0], ld[1] - 8]),
     fill: "none", stroke: "rgba(255,255,255,.09)", "stroke-width": 1,
   }));
+  const lidTemperatureGlow = el("g", { class: "temperature-surface-glow" });
+  lidTemperatureGlow.appendChild(el("polygon", {
+    ...temperatureOutline, points: pts(la, lb, lc, ld),
+  }));
+  lidTemperatureGlow.appendChild(el("polygon", {
+    ...temperatureOutline, points: pts(la, ld, [ld[0], ld[1] + LIFT], [la[0], la[1] + LIFT]),
+  }));
+  lidTemperatureGlow.appendChild(el("polygon", {
+    ...temperatureOutline, points: pts(ld, lc, [lc[0], lc[1] + LIFT], [ld[0], ld[1] + LIFT]),
+  }));
+  lid.appendChild(lidTemperatureGlow);
   const lidLamp = el("circle", { cx: 160, cy: FACE.b[1] - LIFT + 15, r: 3.4, fill: "#E034E3", opacity: .25 });
   lidLamp.style.transition = "opacity .6s ease, fill .6s ease";
   lid.appendChild(lidLamp);
@@ -191,11 +233,22 @@ export function createCycler(host, { compact = false } = {}) {
   let lastAngle = null;
   function update(state) {
     const block = state.block_current;
-    const heating = state.block_target !== null && state.block_target !== undefined;
+    const lidTemp = state.lid_current;
 
     // wells follow the block temperature
     const color = tempColor(block);
     for (const w of wells) w.setAttribute("fill", color);
+
+    // Each component warns from its measured temperature, not merely from a
+    // requested target, and leaves the warning state as telemetry normalizes.
+    const blockHot = isHotSurface(block);
+    const lidHot = isHotSurface(lidTemp);
+    const blockCold = isColdSurface(block);
+    const lidCold = isColdSurface(lidTemp);
+    blockTemperatureGlow.classList.toggle("is-hot", blockHot);
+    blockTemperatureGlow.classList.toggle("is-cold", blockCold);
+    lidTemperatureGlow.classList.toggle("is-hot", lidHot);
+    lidTemperatureGlow.classList.toggle("is-cold", lidCold);
 
     // halo intensity tracks how hot the block actually is
     if (block === null || block === undefined || block < 30) {
@@ -216,9 +269,16 @@ export function createCycler(host, { compact = false } = {}) {
 
     lidLamp.setAttribute("opacity", state.lid_target ? .95 : .25);
     lidLamp.setAttribute("fill", state.lid_target ? "#E034E3" : "#6E6076");
+    const warnings = [
+      blockHot && "hot block", lidHot && "hot lid",
+      blockCold && "cold block", lidCold && "cold lid",
+    ].filter(Boolean);
     svg.setAttribute("aria-label",
       `Thermocycler, lid ${state.lid_status}, block ` +
-      (block === null || block === undefined ? "unknown" : `${block.toFixed(1)} degrees`));
+      (block === null || block === undefined ? "unknown" : `${block.toFixed(1)} degrees`) +
+      `, lid temperature ` +
+      (lidTemp === null || lidTemp === undefined ? "unknown" : `${lidTemp.toFixed(1)} degrees`) +
+      (warnings.length ? `, warning: ${warnings.join(" and ")}` : ""));
   }
 
   return { update, svg };

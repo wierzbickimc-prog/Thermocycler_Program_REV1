@@ -112,6 +112,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"found": found, "devices": self._state()})
             if path == "/api/profiles":
                 return self._json(profile_lib.save_profile(body))
+            if path.startswith("/api/profiles/") and path.endswith("/active"):
+                pid = unquote(path[len("/api/profiles/"):-len("/active")])
+                if not isinstance(body.get("active"), bool):
+                    raise ValueError("'active' must be true or false.")
+                return self._json(profile_lib.set_builtin_active(pid, body["active"]))
             if path.startswith("/api/device/"):
                 rest = path[len("/api/device/"):]
                 dev_id, _, verb = rest.partition("/")
@@ -166,6 +171,11 @@ class Handler(BaseHTTPRequestHandler):
                 prof = profile_lib.get_profile(body["profile_id"])
             else:
                 prof = profile_lib.validate_profile(prof)
+            required = prof.get("lid_position", "closed")
+            actual = dev.snapshot()["lid_status"]
+            if actual != required:
+                raise ValueError(
+                    f"Profile requires the lid {required}; current lid is {actual}.")
             dev.run_profile(prof)
         else:
             raise ValueError(f"Unknown action: {name}")
@@ -188,6 +198,7 @@ class Handler(BaseHTTPRequestHandler):
                 "volume": None,
                 "lid_temp": None,        # lid stays off: it must be open to observe
                 "preheat_lid": False,
+                "lid_position": "open",
             })
             return session.snapshot()
 

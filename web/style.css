@@ -181,6 +181,8 @@ body {
 
 .field { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
 .field label { font-size: 13px; color: var(--ink-soft); }
+.profile-lid-option { margin: 12px 0 3px; max-width: 360px; }
+.profile-option-hint { margin: 0 0 12px; color: var(--ink-muted); font-size: 11.5px; }
 input[type="text"], input[type="number"], select {
   font: inherit; font-size: 13px; color: var(--ink);
   background: rgba(0, 0, 0, .3); border: 1px solid rgba(255,255,255,.13);
@@ -241,8 +243,27 @@ input:focus, select:focus { outline: none; border-color: var(--magenta); box-sha
 .view { animation: fade .3s ease; }
 @keyframes fade { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: none; } }
 
+.temperature-surface-glow {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .7s ease;
+}
+.temperature-surface-glow.is-hot {
+  color: #FF3D57;
+  animation: temperature-surface-pulse 3.2s ease-in-out infinite;
+}
+.temperature-surface-glow.is-cold {
+  color: #168BFF;
+  animation: temperature-surface-pulse 3.2s ease-in-out infinite;
+}
+@keyframes temperature-surface-pulse {
+  0%, 100% { opacity: .34; }
+  50% { opacity: .92; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .001ms !important; transition-duration: .001ms !important; }
+  .temperature-surface-glow:is(.is-hot, .is-cold) { animation: none !important; opacity: .72; }
 }
 
 /* ---------- modal ------------------------------------------------------- */
@@ -292,12 +313,15 @@ input:focus, select:focus { outline: none; border-color: var(--magenta); box-sha
 }
 .prof-row b { font-size: 14px; }
 .prof-row .meta { color: var(--ink-muted); font-size: 12px; margin-top: 2px; }
+.prof-row.inactive { background: rgba(255,255,255,.015); }
+.prof-row.inactive > div:first-child { opacity: .58; }
 .tag {
   font-size: 9.5px; letter-spacing: .1em; text-transform: uppercase;
   padding: 3px 7px; border-radius: 5px; font-weight: 700;
 }
 .tag-std { color: var(--violet-soft); background: rgba(123,92,255,.16); }
 .tag-user { color: var(--jade); background: rgba(0,168,120,.16); }
+.tag-off { color: var(--ink-muted); background: rgba(255,255,255,.07); }
 
 /* ---------- freedom unit ------------------------------------------------- */
 #freedom-btn {

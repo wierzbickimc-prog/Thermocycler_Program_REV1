@@ -462,6 +462,10 @@ class Worker(threading.Thread):
                 self._phase = "preheat"
                 self._log(f"Preheating lid to {lid_temp:.1f} C "
                           f"before block steps...", "info")
+        else:
+            # None means the profile explicitly runs without heated-lid power;
+            # do not inherit a target left behind by an earlier manual action.
+            self._send(GCODE["deactivate_lid"])
         self._emit("run_started", total=len(steps))
 
     def _abort_run(self, silent=False, deactivate=False):

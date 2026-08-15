@@ -1,5 +1,6 @@
 """Unit tests for the pure protocol helpers (no hardware / GUI needed)."""
 import thermocycler_core as tc
+import profiles as profile_lib
 
 
 def test_build_set_block_temp_only():
@@ -18,6 +19,61 @@ def test_describe_gcode():
     assert tc.describe_gcode("M104 S95.00 V25.0") == "Set block temperature"
     assert tc.describe_gcode("M126") == "Open lid"
     assert tc.describe_gcode("G999") is None
+
+
+def _minimal_profile(**options):
+    return {
+        "name": "test",
+        "stages": [{"name": "hold", "cycles": 1,
+                    "steps": [{"temp": 25, "seconds": 10}]}],
+        **options,
+    }
+
+
+def test_profile_lid_position_defaults_closed():
+    assert profile_lib.validate_profile(_minimal_profile())["lid_position"] == "closed"
+
+
+def test_open_lid_profile_disables_heated_lid():
+    prof = profile_lib.validate_profile(_minimal_profile(
+        lid_position="open", lid_temp=105, preheat_lid=True))
+    assert prof["lid_position"] == "open"
+    assert prof["lid_temp"] is None and prof["preheat_lid"] is False
+
+
+def test_profile_rejects_unknown_lid_position():
+    try:
+        profile_lib.validate_profile(_minimal_profile(lid_position="ajar"))
+    except ValueError as exc:
+        assert "lid_position" in str(exc)
+    else:
+        raise AssertionError("invalid lid position was accepted")
+
+
+def test_builtin_profile_activation_is_persisted():
+    import tempfile
+    from pathlib import Path
+    original = profile_lib.SETTINGS_FILE
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile_lib.SETTINGS_FILE = Path(tmp) / "profile_settings.json"
+            changed = profile_lib.set_builtin_active("std-3step", False)
+            assert changed["active"] is False
+            listed = {p["id"]: p for p in profile_lib.list_profiles()}
+            assert listed["std-3step"]["active"] is False
+            profile_lib.set_builtin_active("std-3step", True)
+            assert profile_lib.get_profile("std-3step")["active"] is True
+    finally:
+        profile_lib.SETTINGS_FILE = original
+
+
+def test_user_profile_cannot_use_builtin_activation_setting():
+    try:
+        profile_lib.set_builtin_active("user:custom", False)
+    except ValueError as exc:
+        assert "standard profiles" in str(exc)
+    else:
+        raise AssertionError("user profile accepted by built-in activation setting")
 
 
 def test_parse_plate_response():
@@ -94,6 +150,17 @@ def _drain(w):
     while not w.out_q.empty():
         out.append(w.out_q.get())
     return out
+
+
+def test_profile_without_lid_temp_turns_heated_lid_off():
+    """An open-lid profile must not inherit an earlier heated-lid target."""
+    import queue
+    w = tc.Worker(queue.Queue())
+    w._transport = tc.SimulatorTransport()
+    w._transport.lid_target = 90.0
+    w._start_run([{"label": "s", "temp": 25.0, "seconds": 10}],
+                 25.0, None, False)
+    assert w._transport.lid_target is None
 
 
 def test_ramp_timeout_keeps_indefinite_hold():

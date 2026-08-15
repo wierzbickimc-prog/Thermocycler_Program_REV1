@@ -13,15 +13,17 @@ from pathlib import Path
 from thermocycler_core import BLOCK_MIN_C, BLOCK_MAX_C
 
 USER_DIR = Path.home() / ".builtdna" / "profiles"
+SETTINGS_FILE = Path.home() / ".builtdna" / "profile_settings.json"
 
 
 # ---------------------------------------------------------------------------
 #  Built-in presets
 # ---------------------------------------------------------------------------
-def _profile(pid, name, note, stages, lid_temp=105.0, volume=25.0, preheat=True):
+def _profile(pid, name, note, stages, lid_temp=105.0, volume=25.0,
+             preheat=True, lid_position="closed"):
     return {"id": pid, "name": name, "note": note, "builtin": True,
             "lid_temp": lid_temp, "volume": volume, "preheat_lid": preheat,
-            "stages": stages}
+            "lid_position": lid_position, "stages": stages}
 
 
 BUILTIN = [
@@ -111,6 +113,40 @@ BUILTIN = [
 BUILTIN_BY_ID = {p["id"]: p for p in BUILTIN}
 
 
+def _disabled_builtins():
+    """Return the persisted set of built-in profile ids hidden from selectors."""
+    try:
+        with SETTINGS_FILE.open() as f:
+            data = json.load(f)
+        values = data.get("disabled_builtins", []) if isinstance(data, dict) else []
+        return {pid for pid in values if pid in BUILTIN_BY_ID}
+    except Exception:
+        return set()
+
+
+def _save_disabled_builtins(disabled):
+    SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    tmp = SETTINGS_FILE.with_suffix(".tmp")
+    with tmp.open("w") as f:
+        json.dump({"disabled_builtins": sorted(disabled)}, f, indent=2)
+    tmp.replace(SETTINGS_FILE)
+
+
+def set_builtin_active(pid, active):
+    """Persist availability for a built-in profile and return its new snapshot."""
+    if pid not in BUILTIN_BY_ID:
+        raise ValueError("Only standard profiles can be activated or deactivated.")
+    disabled = _disabled_builtins()
+    if active:
+        disabled.discard(pid)
+    else:
+        disabled.add(pid)
+    _save_disabled_builtins(disabled)
+    prof = dict(BUILTIN_BY_ID[pid])
+    prof["active"] = pid not in disabled
+    return prof
+
+
 # ---------------------------------------------------------------------------
 #  Validation - shared by the loader and the HTTP layer
 # ---------------------------------------------------------------------------
@@ -171,12 +207,24 @@ def validate_profile(data):
             raise ValueError(f"'{key}' must be between {lo} and {hi}.")
         return val
 
+    lid_position = str(data.get("lid_position") or "closed").lower()
+    if lid_position not in ("open", "closed"):
+        raise ValueError("'lid_position' must be 'open' or 'closed'.")
+
+    lid_temp = _num("lid_temp", 105.0, 37.0, 110.0)
+    preheat_lid = bool(data.get("preheat_lid", True))
+    # An open heated lid provides no benefit and creates an exposed hot surface.
+    if lid_position == "open":
+        lid_temp = None
+        preheat_lid = False
+
     return {
         "name": str(data.get("name") or "Untitled profile"),
         "note": str(data.get("note") or ""),
-        "lid_temp": _num("lid_temp", 105.0, 37.0, 110.0),
+        "lid_position": lid_position,
+        "lid_temp": lid_temp,
         "volume": _num("volume", 25.0, 0.0, 100.0),
-        "preheat_lid": bool(data.get("preheat_lid", True)),
+        "preheat_lid": preheat_lid,
         "stages": validate_stages(data.get("stages")),
     }
 
@@ -202,7 +250,12 @@ def _unique_path(slug):
 
 def list_profiles():
     """All profiles: built-ins first, then saved ones sorted by name."""
-    out = [dict(p) for p in BUILTIN]
+    disabled = _disabled_builtins()
+    out = []
+    for original in BUILTIN:
+        prof = dict(original)
+        prof["active"] = prof["id"] not in disabled
+        out.append(prof)
     saved = []
     if USER_DIR.is_dir():
         for path in sorted(USER_DIR.glob("*.json")):
@@ -212,7 +265,7 @@ def list_profiles():
                 prof = validate_profile(data)
             except Exception:
                 continue                      # skip unreadable files silently
-            prof.update(id=f"user:{path.stem}", builtin=False)
+            prof.update(id=f"user:{path.stem}", builtin=False, active=True)
             saved.append(prof)
     saved.sort(key=lambda p: p["name"].lower())
     return out + saved
@@ -220,13 +273,15 @@ def list_profiles():
 
 def get_profile(pid):
     if pid in BUILTIN_BY_ID:
-        return dict(BUILTIN_BY_ID[pid])
+        prof = dict(BUILTIN_BY_ID[pid])
+        prof["active"] = pid not in _disabled_builtins()
+        return prof
     if pid.startswith("user:"):
         path = USER_DIR / f"{pid[5:]}.json"
         if path.is_file():
             with path.open() as f:
                 prof = validate_profile(json.load(f))
-            prof.update(id=pid, builtin=False)
+            prof.update(id=pid, builtin=False, active=True)
             return prof
     raise KeyError(f"No such profile: {pid}")
 
@@ -242,7 +297,7 @@ def save_profile(data):
         path = _unique_path(_slug(prof["name"]))
     with path.open("w") as f:
         json.dump(prof, f, indent=2)
-    prof.update(id=f"user:{path.stem}", builtin=False)
+    prof.update(id=f"user:{path.stem}", builtin=False, active=True)
     return prof
 
 

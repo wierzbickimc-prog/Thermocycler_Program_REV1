@@ -242,3 +242,115 @@ input:focus, select:focus { outline: none; border-color: var(--magenta); box-sha
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .001ms !important; transition-duration: .001ms !important; }
 }
+
+/* ---------- modal ------------------------------------------------------- */
+.modal-back {
+  position: fixed; inset: 0; background: rgba(10, 5, 12, .68);
+  backdrop-filter: blur(3px); display: flex; align-items: center;
+  justify-content: center; z-index: 80; opacity: 0; transition: opacity .16s;
+}
+.modal-back.show { opacity: 1; }
+.modal {
+  background: linear-gradient(168deg, #3A2740, #241630);
+  border: var(--line); border-radius: var(--radius); box-shadow: var(--shadow);
+  padding: 22px; max-width: 460px; width: calc(100% - 40px);
+  transform: translateY(10px) scale(.98); transition: transform .18s cubic-bezier(.2,.7,.3,1);
+}
+.modal-back.show .modal { transform: none; }
+.modal h3 { margin: 0 0 8px; font-size: 17px; letter-spacing: -.01em; text-transform: none; color: var(--ink); }
+.modal p { margin: 0 0 18px; color: var(--ink-soft); font-size: 13.5px; line-height: 1.55; }
+.modal .warn-list { margin: 0 0 18px; padding-left: 18px; color: var(--ink-soft); font-size: 13px; line-height: 1.7; }
+.modal-actions { display: flex; gap: 9px; justify-content: flex-end; }
+.modal input { width: 100%; text-align: left; margin-bottom: 18px; }
+
+/* ---------- editable profile cells -------------------------------------- */
+.stages tr.sel td { box-shadow: inset 2px 0 0 var(--magenta); }
+.stages td.edit { cursor: text; border-radius: 5px; }
+.stages td.edit:hover { background: rgba(255,255,255,.07); outline: 1px solid rgba(255,255,255,.14); }
+.stages td.edit.on { background: rgba(0,0,0,.35); outline: 1px solid var(--magenta); }
+.stages td.edit input {
+  width: 100%; background: none; border: none; padding: 0; text-align: right;
+  color: var(--ink); font: inherit; font-variant-numeric: tabular-nums;
+}
+.stages td.edit input:focus { outline: none; box-shadow: none; }
+.stages .name-cell input { text-align: left; }
+.dirty-dot {
+  display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+  background: var(--magenta); margin-left: 8px; vertical-align: middle;
+}
+.toolbar { display: flex; gap: 7px; flex-wrap: wrap; align-items: center; margin: 12px 0; }
+.toolbar .grow { flex: 1; }
+
+/* ---------- profile manager --------------------------------------------- */
+.prof-list { display: flex; flex-direction: column; gap: 8px; }
+.prof-row {
+  display: flex; align-items: center; gap: 12px; padding: 12px 14px;
+  border: var(--line); border-radius: var(--radius-sm);
+  background: rgba(255,255,255,.03);
+}
+.prof-row b { font-size: 14px; }
+.prof-row .meta { color: var(--ink-muted); font-size: 12px; margin-top: 2px; }
+.tag {
+  font-size: 9.5px; letter-spacing: .1em; text-transform: uppercase;
+  padding: 3px 7px; border-radius: 5px; font-weight: 700;
+}
+.tag-std { color: var(--violet-soft); background: rgba(123,92,255,.16); }
+.tag-user { color: var(--jade); background: rgba(0,168,120,.16); }
+
+/* ---------- freedom unit ------------------------------------------------- */
+#freedom-btn {
+  position: fixed; right: 10px; bottom: 8px; z-index: 30;
+  font-size: 9px; letter-spacing: .1em; text-transform: uppercase;
+  color: rgba(255,255,255,.16); background: none; border: none;
+  cursor: pointer; padding: 6px 8px; font-family: var(--font); font-weight: 700;
+  transition: color .25s ease;
+}
+#freedom-btn:hover { color: var(--magenta); }
+#freedom-btn.on { color: #E8556D; }
+#freedom-stage {
+  position: fixed; inset: 0; z-index: 100; pointer-events: none; overflow: hidden;
+}
+
+/* ---------- thermal QC --------------------------------------------------- */
+.qc-intro h4 { margin: 0 0 6px; font-size: 16px; letter-spacing: -.01em; }
+.qc-intro p { margin: 0 0 16px; color: var(--ink-soft); font-size: 13px; line-height: 1.6; }
+.qc-help { margin-bottom: 16px; border: var(--line); border-radius: var(--radius-sm);
+           background: rgba(0,0,0,.18); }
+.qc-help summary { cursor: pointer; padding: 10px 14px; font-size: 12px;
+  font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-muted); }
+.qc-help[open] summary { border-bottom: var(--line); }
+.qc-help ol { margin: 12px 0; padding-left: 34px; color: var(--ink-soft);
+              font-size: 13px; line-height: 1.75; }
+.qc-help li { margin-bottom: 5px; }
+.qc-caution { margin: 0 14px 12px; padding: 10px 12px; border-radius: 8px;
+  background: rgba(232,85,109,.10); border: 1px solid rgba(232,85,109,.3); }
+.qc-caution p { margin: 0 0 6px; color: #FFC9D2; font-size: 12.5px; line-height: 1.55; }
+.qc-caution p:last-child { margin-bottom: 0; }
+.qc-form .field label { min-width: 150px; }
+.qc-run-head { display: flex; align-items: flex-start; gap: 16px; margin-bottom: 16px; }
+.qc-hint { color: var(--ink-soft); font-size: 12.5px; margin: 0 0 12px; }
+
+.plate { overflow-x: auto; padding-bottom: 6px; }
+.plate-grid { display: grid; grid-template-columns: 26px repeat(12, 1fr);
+              gap: 4px; min-width: 620px; }
+.plate-head { color: var(--ink-muted); font-size: 10px; text-align: center;
+              align-self: center; font-weight: 700; }
+.plate-corner { }
+.well {
+  aspect-ratio: 1; border-radius: 50%; cursor: pointer;
+  border: 1px solid rgba(255,255,255,.16); background: rgba(255,255,255,.10);
+  color: var(--ink); font: inherit; font-size: 8.5px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center; padding: 0;
+  transition: background .15s, border-color .15s, transform .08s;
+  font-variant-numeric: tabular-nums;
+}
+.well:hover { transform: scale(1.12); border-color: var(--magenta); }
+.well.melted {
+  background: linear-gradient(150deg, var(--magenta), #B32BC9);
+  border-color: transparent; color: #fff;
+}
+.qc-stats { display: flex; flex-wrap: wrap; gap: 8px 26px; margin: 16px 0 0;
+            font-size: 13px; }
+.qc-stat { display: flex; gap: 8px; align-items: baseline; }
+.qc-stat span { color: var(--ink-muted); }
+.qc-ok { color: var(--ok); } .qc-warn { color: var(--warn); } .qc-crit { color: var(--crit); }

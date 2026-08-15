@@ -19,9 +19,10 @@ import time
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 import profiles as profile_lib
+import qc as qc_lib
 from devices import DeviceManager
 
 WEB_DIR = Path(__file__).resolve().parent / "web"
@@ -69,8 +70,31 @@ class Handler(BaseHTTPRequestHandler):
                 return self._events()
             if path == "/api/profiles":
                 return self._json({"profiles": profile_lib.list_profiles()})
+            if path == "/api/qc/materials":
+                return self._json({
+                    "materials": qc_lib.MATERIALS,
+                    "instructions": qc_lib.OPERATOR_STEPS,
+                    "cautions": qc_lib.CAUTIONS,
+                    "wells": qc_lib.WELLS,
+                    "rows": list(qc_lib.ROWS), "cols": qc_lib.COLS,
+                })
             if path.startswith("/api/device/"):
-                dev_id = path[len("/api/device/"):]
+                rest = path[len("/api/device/"):]
+                dev_id, _, verb = rest.partition("/")
+                # Device ids may contain slashes (port:/dev/cu.usbmodem...), so the
+                # client percent-encodes them; decode after splitting off the verb.
+                dev_id = unquote(dev_id)
+                MANAGER.get(dev_id)                       # 404 for unknown device
+                if verb == "qc":
+                    s = qc_lib.get_session(dev_id)
+                    return self._json(s.snapshot() if s else {"active": False})
+                if verb == "qc/csv":
+                    s = qc_lib.get_session(dev_id)
+                    if s is None:
+                        return self._error(404, "No QC session")
+                    body = s.to_csv().encode()
+                    return self._send(200, body, "text/csv", {
+                        "Content-Disposition": 'attachment; filename="thermal-qc.csv"'})
                 dev = MANAGER.get(dev_id)
                 return self._json(dev.snapshot(with_history=True, with_log=True))
             return self._static(path)
@@ -91,12 +115,15 @@ class Handler(BaseHTTPRequestHandler):
             if path.startswith("/api/device/"):
                 rest = path[len("/api/device/"):]
                 dev_id, _, verb = rest.partition("/")
+                dev_id = unquote(dev_id)
                 dev = MANAGER.get(dev_id)
                 if verb == "name":
                     MANAGER.rename(dev_id, body.get("name"))
                     return self._json(dev.snapshot())
                 if verb == "action":
                     return self._json(self._action(dev, body))
+                if verb.startswith("qc"):
+                    return self._json(self._qc(dev, verb, body))
             self._error(404, "Unknown endpoint")
         except KeyError as exc:
             self._error(404, f"Not found: {exc}")
@@ -143,6 +170,48 @@ class Handler(BaseHTTPRequestHandler):
         else:
             raise ValueError(f"Unknown action: {name}")
         return dev.snapshot()
+
+    # -- thermal QC --------------------------------------------------------
+    def _qc(self, dev, verb, body):
+        if verb == "qc/start":
+            qc_lib.clear_session(dev.id)
+            session = qc_lib.start_session(
+                device_id=dev.id, device_name=dev.name,
+                material_id=body["material_id"],
+                start=body["start"], end=body["end"],
+                step=body["step"], dwell=body["dwell"],
+                operator=body.get("operator", ""), lot=body.get("lot", ""))
+            # Run the sweep through the ordinary profile path.
+            dev.run_profile({
+                "name": f"QC — {session.material['name']}",
+                "stages": session.stages,
+                "volume": None,
+                "lid_temp": None,        # lid stays off: it must be open to observe
+                "preheat_lid": False,
+            })
+            return session.snapshot()
+
+        session = qc_lib.get_session(dev.id)
+        if session is None:
+            raise ValueError("No QC session is running on this instrument.")
+
+        if verb == "qc/mark":
+            session.mark(body.get("wells", []), body["temp"])
+        elif verb == "qc/unmark":
+            session.unmark(body.get("wells", []))
+        elif verb == "qc/finish":
+            path = session.finish()
+            snap = session.snapshot()
+            snap["saved_to"] = path
+            dev.action("stop_run")
+            return snap
+        elif verb == "qc/abort":
+            dev.action("stop_run")
+            qc_lib.clear_session(dev.id)
+            return {"active": False}
+        else:
+            raise ValueError(f"Unknown QC endpoint: {verb}")
+        return session.snapshot()
 
     # -- state / streaming -------------------------------------------------
     @staticmethod

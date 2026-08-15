@@ -32,7 +32,39 @@ Events; the page is a small ES-module SPA under `web/`.
 - **Profile library** — five built-in presets (standard 3-step, 2-step fast,
   touchdown, colony PCR, restriction digest) plus your own saved profiles in
   `~/.builtdna/profiles/`.
-- **Deep links** — `#/device/<id>/graph` and `/log` address a specific tab.
+- **Profile editor** — click any value in the stage table to edit it; add,
+  duplicate, delete and reorder stages and steps; Save, or Save as… to fork a
+  read-only preset. Built-in presets cannot be overwritten.
+- **Busy-machine guard** — starting a run on an instrument that is already
+  running or holding a target asks for confirmation first and lists exactly what
+  it is doing before overriding.
+- **Deep links** — `#/device/<id>/graph`, `/qc` and `/log` address a specific tab.
+
+## Thermal QC
+
+A QC tab that checks block accuracy *and* uniformity using a melting-point
+standard, read visually by the operator — see `qc.py`.
+
+The instrument has one block thermistor, so it cannot report well-to-well
+spread. Loading a known-melting-point solid across the plate and recording the
+setpoint at which each well turns clear gives you that spread directly.
+
+- Pick a material (lauric / myristic / palmitic / stearic acid, or vanillin),
+  and the sweep window defaults to ±4 °C around its melting point.
+- The sweep is a step-and-dwell profile — it runs through the same tested
+  runner as any other profile.
+- Click each well on the 96-well map as it turns clear; the current setpoint is
+  stamped against it.
+- Results: mean melt vs nominal (**accuracy**) and the spread across the plate
+  (**uniformity**), written to `~/.builtdna/qc/` as CSV and JSON.
+
+Run it with the **lid open** — the observation is visual, so the heated lid stays
+off for the whole sweep. Results read slightly high, because you are watching the
+top of the sample while the block heats it from below; treat this as a
+"within X °C of nominal" check rather than an absolute calibration.
+
+**Never use gallium as the standard.** It is an ITS-90 fixed point and otherwise
+ideal, but it attacks aluminium and would permanently damage the block.
 
 Set `BUILTDNA_SIMULATORS=3` to populate the grid with simulated instruments for a
 demo or for UI work with no hardware attached.

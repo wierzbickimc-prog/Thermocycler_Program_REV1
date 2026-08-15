@@ -25,12 +25,12 @@ Events; the page is a small ES-module SPA under `web/`.
 
 <table>
   <tr>
-    <td width="50%"><strong>Instrument fleet</strong><br><a href="https://github.com/wierzbickimc-prog/Thermocycler_Program_REV1/blob/builtdna-console/docs/screenshots/fleet-overview.png"><img src="https://raw.githubusercontent.com/wierzbickimc-prog/Thermocycler_Program_REV1/builtdna-console/docs/screenshots/fleet-overview.png" alt="Fleet overview showing three simulated thermocyclers"></a></td>
-    <td width="50%"><strong>Device controls and profile editor</strong><br><a href="https://github.com/wierzbickimc-prog/Thermocycler_Program_REV1/blob/builtdna-console/docs/screenshots/device-profile.png"><img src="https://raw.githubusercontent.com/wierzbickimc-prog/Thermocycler_Program_REV1/builtdna-console/docs/screenshots/device-profile.png" alt="Thermocycler device controls and PCR profile editor"></a></td>
+    <td width="50%"><strong>Instrument fleet</strong><br><a href="https://github.com/wierzbickimc-prog/Thermocycler_Program_REV1/blob/main/docs/screenshots/fleet-overview.png"><img src="https://raw.githubusercontent.com/wierzbickimc-prog/Thermocycler_Program_REV1/main/docs/screenshots/fleet-overview.png" alt="Fleet overview showing three simulated thermocyclers"></a></td>
+    <td width="50%"><strong>Device controls and profile editor</strong><br><a href="https://github.com/wierzbickimc-prog/Thermocycler_Program_REV1/blob/main/docs/screenshots/device-profile.png"><img src="https://raw.githubusercontent.com/wierzbickimc-prog/Thermocycler_Program_REV1/main/docs/screenshots/device-profile.png" alt="Thermocycler device controls and PCR profile editor"></a></td>
   </tr>
   <tr>
-    <td width="50%"><strong>Profile administration</strong><br><a href="https://github.com/wierzbickimc-prog/Thermocycler_Program_REV1/blob/builtdna-console/docs/screenshots/profile-administration.png"><img src="https://raw.githubusercontent.com/wierzbickimc-prog/Thermocycler_Program_REV1/builtdna-console/docs/screenshots/profile-administration.png" alt="Administration screen for standard PCR profiles"></a></td>
-    <td width="50%"><strong>Thermal QC</strong><br><a href="https://github.com/wierzbickimc-prog/Thermocycler_Program_REV1/blob/builtdna-console/docs/screenshots/thermal-qc.png"><img src="https://raw.githubusercontent.com/wierzbickimc-prog/Thermocycler_Program_REV1/builtdna-console/docs/screenshots/thermal-qc.png" alt="Thermal quality control setup interface"></a></td>
+    <td width="50%"><strong>Profile administration</strong><br><a href="https://github.com/wierzbickimc-prog/Thermocycler_Program_REV1/blob/main/docs/screenshots/profile-administration.png"><img src="https://raw.githubusercontent.com/wierzbickimc-prog/Thermocycler_Program_REV1/main/docs/screenshots/profile-administration.png" alt="Administration screen for standard PCR profiles"></a></td>
+    <td width="50%"><strong>Thermal QC</strong><br><a href="https://github.com/wierzbickimc-prog/Thermocycler_Program_REV1/blob/main/docs/screenshots/thermal-qc.png"><img src="https://raw.githubusercontent.com/wierzbickimc-prog/Thermocycler_Program_REV1/main/docs/screenshots/thermal-qc.png" alt="Thermal quality control setup interface"></a></td>
   </tr>
 </table>
 

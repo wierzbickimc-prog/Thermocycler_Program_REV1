@@ -136,7 +136,10 @@ function renderLanding() {
               <div class="card-name"></div>
               <div class="card-port"></div>
             </div>
-            <div class="card-pill"></div>
+            <div class="card-actions">
+              <div class="card-pill"></div>
+              <button class="btn btn-sm sim-toggle" type="button" hidden></button>
+            </div>
           </div>
           <div class="card-art"></div>
           <div class="card-readouts">
@@ -154,6 +157,15 @@ function renderLanding() {
           <div class="card-status"></div>
           <div class="progress"><i style="width:0"></i></div>`;
         card.addEventListener("click", () => { location.hash = `#/device/${d.id}`; });
+        card.querySelector(".sim-toggle").addEventListener("click", async ev => {
+          ev.stopPropagation();
+          const button = ev.currentTarget;
+          const device = deviceById(card.dataset.id);
+          if (!device) return;
+          button.disabled = true;
+          await act(device.id, device.connected ? "disconnect" : "connect");
+          button.disabled = false;
+        });
         grid.appendChild(card);
         cyclers.set(d.id, createCycler(card.querySelector(".card-art"), { compact: true }));
       }
@@ -162,6 +174,10 @@ function renderLanding() {
       card.querySelector(".card-port").textContent =
         d.simulated ? "simulated instrument" : (d.port || "—");
       card.querySelector(".card-pill").innerHTML = statusPill(d);
+      const simToggle = card.querySelector(".sim-toggle");
+      simToggle.hidden = !d.simulated;
+      simToggle.textContent = d.connected ? "Deactivate" : "Activate";
+      simToggle.title = `${d.connected ? "Deactivate" : "Activate"} ${d.name}`;
       card.querySelector(".ro-block").innerHTML = `${fmtTemp(d.block_current)}<span class="unit">${u}</span>`;
       card.querySelector(".ro-lid").innerHTML = `${fmtTemp(d.lid_current)}<span class="unit">${u}</span>`;
       card.querySelector(".ro-block-t").textContent =
@@ -779,7 +795,9 @@ function renderControl(id, initialTab = "profile") {
       (d.simulated ? "Simulated instrument" : d.port || "—") +
       (d.profile_name ? ` · ${d.profile_name}` : "");
     document.getElementById("dev-pill").innerHTML = statusPill(d);
-    document.getElementById("conn-btn").textContent = d.connected ? "Disconnect" : "Connect";
+    document.getElementById("conn-btn").textContent = d.simulated
+      ? (d.connected ? "Deactivate simulator" : "Activate simulator")
+      : (d.connected ? "Disconnect" : "Connect");
     document.getElementById("c-block").innerHTML = `${fmtTemp(d.block_current)}<span class="unit">${u}</span>`;
     document.getElementById("c-lid").innerHTML = `${fmtTemp(d.lid_current)}<span class="unit">${u}</span>`;
     document.getElementById("c-block-t").textContent =

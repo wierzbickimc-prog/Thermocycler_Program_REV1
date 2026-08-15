@@ -60,6 +60,20 @@ GCODE = {
     "deactivate_all": "M18",
 }
 
+GCODE_DESCRIPTIONS = {
+    GCODE["set_block"]: "Set block temperature",
+    GCODE["get_block"]: "Read block temperature",
+    GCODE["set_lid"]: "Set lid temperature",
+    GCODE["get_lid"]: "Read lid temperature",
+    GCODE["get_lid_status"]: "Read lid status",
+    GCODE["open_lid"]: "Open lid",
+    GCODE["close_lid"]: "Close lid",
+    GCODE["plate_lift"]: "Lift plate",
+    GCODE["deactivate_block"]: "Deactivate block",
+    GCODE["deactivate_lid"]: "Deactivate lid",
+    GCODE["deactivate_all"]: "Deactivate all",
+}
+
 # Physical limits for the GEN 1 module (used for input validation only).
 BLOCK_MIN_C, BLOCK_MAX_C = 4.0, 99.0
 LID_MIN_C, LID_MAX_C = 37.0, 110.0
@@ -81,6 +95,12 @@ def build_set_block(temp, hold_s=None, volume_uL=None):
 def build_set_lid(temp):
     """Build the M140 command string for a lid-temperature set."""
     return f"{GCODE['set_lid']} S{float(temp):.2f}"
+
+
+def describe_gcode(command):
+    """Return the human-readable action for a G-code command, if known."""
+    code = (command or "").strip().split(maxsplit=1)[0]
+    return GCODE_DESCRIPTIONS.get(code)
 
 
 def parse_key_values(payload):
@@ -361,7 +381,9 @@ class Worker(threading.Thread):
         try:
             resp = self._transport.send(command)
             if not quiet:
-                self._log(command, "tx")
+                description = describe_gcode(command)
+                shown = f"{command} ({description})" if description else command
+                self._log(shown, "tx")
                 if resp:
                     self._log(resp, "rx")
             return resp

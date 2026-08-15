@@ -14,6 +14,12 @@ def test_build_set_lid():
     assert tc.build_set_lid(105) == "M140 S105.00"
 
 
+def test_describe_gcode():
+    assert tc.describe_gcode("M104 S95.00 V25.0") == "Set block temperature"
+    assert tc.describe_gcode("M126") == "Open lid"
+    assert tc.describe_gcode("G999") is None
+
+
 def test_parse_plate_response():
     cur, tgt = tc.parse_temperature("T:none C:25.0 H:123")
     assert cur == 25.0 and tgt is None

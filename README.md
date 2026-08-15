@@ -1,12 +1,50 @@
-# Opentrons Thermocycler Module GEN 1 — Desktop Control GUI
+# Opentrons Thermocycler Module GEN 1 — Control Software
 
-A standalone Python desktop app to control an **Opentrons Thermocycler Module (GEN 1)**
-directly over USB serial — **no OT-2 / Flex robot required**. The module plugs
-straight into your computer and is driven with its native G-code serial protocol.
+Control **Opentrons Thermocycler Modules (GEN 1)** directly over USB serial —
+**no OT-2 / Flex robot required**. The modules plug straight into your computer
+and are driven with their native G-code serial protocol.
 
-![overview](docs_placeholder)
+Two front-ends share one hardware layer (`thermocycler_core.py`):
 
-## What it does
+| | | |
+|---|---|---|
+| **BUILT DNA console** | `python serve.py` | Multi-instrument web UI in BUILT branding — **recommended** |
+| Legacy desktop app | `python thermocycler_gui.py` | Single-instrument Tkinter window |
+
+## BUILT DNA console
+
+```bash
+python serve.py                 # opens http://127.0.0.1:8765
+python serve.py --port 9000 --no-browser
+```
+
+Stdlib only — no Flask/FastAPI. Live state reaches the browser over Server-Sent
+Events; the page is a small ES-module SPA under `web/`.
+
+- **Instrument grid** — every connected thermocycler on one screen with live
+  block/lid temperatures, run progress and lid state. Click a card to open it.
+- **Animated instrument** — an isometric SVG of the module that reflects real
+  state: the lid swings open and shut with `M126`/`M127`, the 96 wells tint with
+  block temperature, and the chassis glows as it heats.
+- **Named instruments** — click the name on the control screen to rename. Units
+  are keyed by USB serial number where the OS exposes one, so a nickname survives
+  reconnects and re-enumeration. Stored in `~/.builtdna/devices.json`.
+- **Profile library** — five built-in presets (standard 3-step, 2-step fast,
+  touchdown, colony PCR, restriction digest) plus your own saved profiles in
+  `~/.builtdna/profiles/`.
+- **Deep links** — `#/device/<id>/graph` and `/log` address a specific tab.
+
+Set `BUILTDNA_SIMULATORS=3` to populate the grid with simulated instruments for a
+demo or for UI work with no hardware attached.
+
+### Chart colours
+
+The block/lid series (`#E034E3` magenta, `#00A878` jade) were chosen by running a
+colour-vision-deficiency validator against the `#1B1020` surface rather than by
+eye: deutan ΔE 15.8, normal-vision ΔE 40.4, contrast ≥ 3:1. Both series are also
+direct-labelled at the line end, so identity never depends on colour alone.
+
+## What the desktop app does
 
 - **Connect** to the module's USB serial port (auto-detected), or run the built-in
   **Simulator** to try the whole interface with no hardware attached.
@@ -20,22 +58,39 @@ straight into your computer and is driven with its native G-code serial protocol
   it sets each target, waits until the block reaches temperature, then holds for the
   configured time, showing a live per-step countdown and progress bar. A step time of
   `0` (or blank) means "hold indefinitely" — handy for a final 4 °C hold.
+  With **Preheat lid** ticked the run waits for the lid to reach temperature
+  before the first block step, to avoid condensation.
+- **Stop** — ends the run *and* deactivates the block and lid. Closing the window
+  while connected offers to do the same, since the module otherwise keeps its last
+  commanded temperature after the GUI is gone.
 - **Live graph** — block and lid temperature plotted over time.
 - **Log** — every command sent and response received.
 
 ## Install
 
-Requires Python 3.8+. Tkinter ships with most Python installs (on some Linux
-distros: `sudo apt install python3-tk`).
+Requires Python 3.8+ **linked against Tcl/Tk 8.6 or newer**. Check before anything else:
 
 ```bash
-pip install -r requirements.txt   # pyserial + matplotlib
+python3 -c "import tkinter; print(tkinter.Tcl().eval('info patchlevel'))"
 ```
+
+If that prints **8.5.x**, the GUI will open as a blank, unresponsive window that
+pins a CPU core — it is not a bug in this program. macOS's built-in
+`/usr/bin/python3` ships Tk 8.5.9 and is affected; use a Homebrew or python.org
+build instead:
+
+```bash
+brew install python@3.11 python-tk@3.11
+python3.11 -m venv .venv
+.venv/bin/pip install -r requirements.txt   # pyserial + matplotlib
+```
+
+On some Linux distros Tkinter is a separate package: `sudo apt install python3-tk`.
 
 ## Run
 
 ```bash
-python thermocycler_gui.py
+.venv/bin/python thermocycler_gui.py
 ```
 
 Pick your port (or **Simulator (demo)**) from the dropdown, click **Connect**, and go.

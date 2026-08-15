@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BUILT DNA — Thermocycler Console</title>
+<link rel="stylesheet" href="/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%232B1B2E'/><path d='M6 6h9v9H6z M17 6h9v9h-9z M6 17h9v9H6z M17 17h9v9h-9z' fill='%23E034E3'/></svg>">
+</head>
+<body>
+
+<header class="topbar">
+  <a class="brand" href="#/">
+    <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
+      <path d="M2 2h13v13H2z"  fill="#E034E3"/>
+      <path d="M2 2h13v13z"    fill="#8E1F91"/>
+      <path d="M17 2h13v13H17z" fill="#E034E3"/>
+      <path d="M30 2v13H17z"    fill="#8E1F91"/>
+      <path d="M2 17h13v13H2z"  fill="#E034E3"/>
+      <path d="M15 17v13H2z"    fill="#8E1F91"/>
+      <path d="M17 17h13v13H17z" fill="#E034E3"/>
+      <path d="M17 17h13v13z"    fill="#8E1F91"/>
+    </svg>
+    <span class="brand-text">
+      <b>BUILT</b>
+      <span>BIOTECHNOLOGIES</span>
+    </span>
+  </a>
+  <div class="topbar-sep"></div>
+  <h1>Thermocycler Console</h1>
+  <div class="spacer"></div>
+  <button class="btn btn-sm" id="scan-btn">Scan for devices</button>
+</header>
+
+<main id="app"></main>
+<div class="toast" id="toast"></div>
+
+<script type="module" src="/app.js"></script>
+</body>
+</html>

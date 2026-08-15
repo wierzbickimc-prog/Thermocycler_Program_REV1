@@ -58,8 +58,6 @@ class App(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Opentrons Thermocycler GEN 1 - Control")
-        self.geometry("1100x720")
-        self.minsize(940, 620)
 
         self.out_q = queue.Queue()
         self.worker = Worker(self.out_q)
@@ -76,8 +74,19 @@ class App(tk.Tk):
         self._build_style()
         self._build_layout()
         self._refresh_ports()
+        self._size_to_content()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self.after(100, self._drain_queue)
+
+    def _size_to_content(self):
+        """Open wide enough for the laid-out content, clamped to the screen."""
+        self.update_idletasks()
+        w = max(1180, self.winfo_reqwidth() + 24)
+        h = max(760, self.winfo_reqheight() + 24)
+        w = min(w, self.winfo_screenwidth() - 80)
+        h = min(h, self.winfo_screenheight() - 120)
+        self.geometry(f"{w}x{h}")
+        self.minsize(min(1000, w), min(640, h))
 
     # ---- styling ---------------------------------------------------------
     def _build_style(self):
@@ -385,6 +394,49 @@ class App(tk.Tk):
             json.dump(data, f, indent=2)
         self._log_line(f"Saved profile to {path}", "info")
 
+    @staticmethod
+    def _validate_profile(data):
+        """Return a clean stage list, or raise ValueError describing the problem."""
+        if not isinstance(data, dict):
+            raise ValueError("Profile must be a JSON object.")
+        stages = data.get("stages")
+        if not isinstance(stages, list) or not stages:
+            raise ValueError("Profile has no 'stages' list.")
+        clean = []
+        for n, stage in enumerate(stages, 1):
+            if not isinstance(stage, dict):
+                raise ValueError(f"Stage {n} is not an object.")
+            steps = stage.get("steps")
+            if not isinstance(steps, list) or not steps:
+                raise ValueError(f"Stage {n} has no 'steps'.")
+            try:
+                cycles = max(1, int(float(stage.get("cycles", 1))))
+            except (TypeError, ValueError):
+                raise ValueError(f"Stage {n}: 'cycles' is not a number.")
+            clean_steps = []
+            for m, st in enumerate(steps, 1):
+                if not isinstance(st, dict) or "temp" not in st:
+                    raise ValueError(f"Stage {n} step {m} has no 'temp'.")
+                try:
+                    temp = float(st["temp"])
+                except (TypeError, ValueError):
+                    raise ValueError(f"Stage {n} step {m}: 'temp' is not numeric.")
+                if not (BLOCK_MIN_C <= temp <= BLOCK_MAX_C):
+                    raise ValueError(f"Stage {n} step {m}: {temp} °C is outside "
+                                     f"{BLOCK_MIN_C}-{BLOCK_MAX_C} °C.")
+                secs = st.get("seconds")
+                if secs in (None, "", 0, "0"):
+                    secs = None
+                else:
+                    try:
+                        secs = int(float(secs))
+                    except (TypeError, ValueError):
+                        raise ValueError(f"Stage {n} step {m}: 'seconds' is not numeric.")
+                clean_steps.append({"temp": temp, "seconds": secs})
+            clean.append({"name": str(stage.get("name") or f"Stage {n}"),
+                          "cycles": cycles, "steps": clean_steps})
+        return clean
+
     def _load_profile(self):
         path = filedialog.askopenfilename(filetypes=[("JSON", "*.json")])
         if not path:
@@ -392,16 +444,18 @@ class App(tk.Tk):
         try:
             with open(path) as f:
                 data = json.load(f)
-            self.stages = data["stages"]
-            if data.get("lid_temp") is not None:
-                self.prof_lid_var.set(str(data["lid_temp"]))
-            if data.get("volume") is not None:
-                self.prof_vol_var.set(str(data["volume"]))
-            self.preheat_var.set(bool(data.get("preheat_lid", True)))
-            self._reload_tree()
-            self._log_line(f"Loaded profile from {path}", "info")
+            stages = self._validate_profile(data)      # validate before committing
         except Exception as exc:
             messagebox.showerror("Load failed", str(exc))
+            return
+        self.stages = stages
+        if data.get("lid_temp") is not None:
+            self.prof_lid_var.set(str(data["lid_temp"]))
+        if data.get("volume") is not None:
+            self.prof_vol_var.set(str(data["volume"]))
+        self.preheat_var.set(bool(data.get("preheat_lid", True)))
+        self._reload_tree()
+        self._log_line(f"Loaded profile from {path}", "info")
 
     # ================= actions =================
     def _to_float(self, s):
@@ -419,7 +473,16 @@ class App(tk.Tk):
             return False
         return True
 
+    def _require_connection(self):
+        if not self.connected:
+            messagebox.showinfo("Not connected",
+                                "Connect to the module (or the Simulator) first.")
+            return False
+        return True
+
     def _set_block(self):
+        if not self._require_connection():
+            return
         temp = self._to_float(self.block_temp_var.get())
         if not self._validate_temp(temp, BLOCK_MIN_C, BLOCK_MAX_C, "block temperature"):
             return
@@ -428,17 +491,21 @@ class App(tk.Tk):
                            volume=self._to_float(self.volume_var.get()))
 
     def _set_lid(self):
+        if not self._require_connection():
+            return
         temp = self._to_float(self.lid_temp_var.get())
         if not self._validate_temp(temp, LID_MIN_C, LID_MAX_C, "lid temperature"):
             return
         self.worker.submit("set_lid", temp=temp)
 
     def _simple(self, action):
-        if not self.connected:
+        if not self._require_connection():
             return
         self.worker.submit(action)
 
     def _run_profile(self):
+        if not self._require_connection():
+            return
         steps = flatten_profile(self.stages)
         if not steps:
             messagebox.showinfo("Run", "Add at least one stage with a step.")
@@ -564,8 +631,13 @@ class App(tk.Tk):
 
     def _update_run_step(self, msg):
         idx = msg["index"]
-        self.run_progress.config(value=idx)
         phase = msg["phase"]
+        if phase == "preheat":
+            # Not a block step yet - no progress and no row to highlight.
+            self.run_status.config(
+                text=f"Preheating lid to {msg['temp']:.0f}°C before block steps...")
+            return
+        self.run_progress.config(value=idx)
         if phase == "ramp":
             txt = f"Step {idx + 1}/{self._run_total}: {msg['label']} - ramping to {msg['temp']:.0f}°C"
         elif phase == "hold_inf":
@@ -606,9 +678,23 @@ class App(tk.Tk):
         self.log.config(state="disabled")
 
     def _on_close(self):
+        # Closing the window does not stop the module heating - it keeps its
+        # last commanded state - so offer to turn things off on the way out.
+        if self.connected:
+            answer = messagebox.askyesnocancel(
+                "Quit",
+                "Deactivate the block and lid before quitting?\n\n"
+                "Yes  - turn the heaters off, then disconnect.\n"
+                "No   - leave the module at its current setting.",
+                default=messagebox.YES)
+            if answer is None:
+                return                       # cancelled: stay open
+            if answer:
+                self.worker.submit("deactivate_all")
         try:
             self.worker.submit("disconnect")
             self.worker.shutdown()
+            self.worker.join(timeout=3.0)    # let the queued commands go out
         finally:
             self.destroy()
 

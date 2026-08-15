@@ -71,6 +71,124 @@ def test_simulator_lid_movement():
     assert sim.lid_status == "in_between"
 
 
+# ---------------------------------------------------------------------------
+#  Runner regression tests - each covers a bug that shipped in the first cut
+# ---------------------------------------------------------------------------
+def _worker(steps, lid_temp=None, preheat=False):
+    """A Worker wired to a simulator, with a profile already started."""
+    import queue
+    w = tc.Worker(queue.Queue())
+    w._transport = tc.SimulatorTransport()
+    w._start_run(steps, 25.0, lid_temp, preheat)
+    return w
+
+
+def _drain(w):
+    out = []
+    while not w.out_q.empty():
+        out.append(w.out_q.get())
+    return out
+
+
+def test_ramp_timeout_keeps_indefinite_hold():
+    """A ramp timeout must not turn 'hold forever' into 'skip this step'."""
+    import time
+    w = _worker([{"label": "4C hold", "temp": 4.0, "seconds": None}])
+    w._phase = "ramp"
+    w._ramp_deadline = time.time() - 1          # force the timeout
+    w._tick_run()
+    assert w._hold_end is None, "indefinite hold lost its None sentinel"
+    w._tick_run()
+    assert w._run_steps is not None, "step was skipped instead of held"
+
+
+def test_ramp_timeout_emits_progress():
+    """The timeout path must still tell the GUI what phase it is in."""
+    import time
+    w = _worker([{"label": "s", "temp": 95.0, "seconds": 30}])
+    w._phase = "ramp"
+    w._ramp_deadline = time.time() - 1
+    _drain(w)
+    w._tick_run()
+    assert any(m["kind"] == "run_step" for m in _drain(w))
+
+
+def test_preheat_waits_for_lid():
+    """With preheat on, no block command may go out until the lid is hot."""
+    w = _worker([{"label": "s", "temp": 95.0, "seconds": 10}],
+                lid_temp=105.0, preheat=True)
+    assert w._phase == "preheat"
+    for _ in range(5):
+        w._tick_run()
+    assert w._transport.block_target is None, "block heated before lid was ready"
+    w._transport.lid_current = 105.0           # lid arrives
+    w._lid_current, w._lid_at = None, 0.0      # invalidate the cache
+    w._tick_run()
+    assert w._phase is None, "runner did not leave preheat once lid was hot"
+
+
+def test_preheat_off_starts_immediately():
+    w = _worker([{"label": "s", "temp": 95.0, "seconds": 10}],
+                lid_temp=105.0, preheat=False)
+    assert w._phase is None
+    w._tick_run()
+    assert w._transport.block_target == 95.0
+
+
+def test_stop_deactivates_heaters():
+    """The Stop button must turn the heaters off, not just stop the timer."""
+    w = _worker([{"label": "s", "temp": 95.0, "seconds": 600}])
+    w._tick_run()
+    assert w._transport.block_target == 95.0
+    w._handle("stop_run", {})                  # exactly what the button submits
+    assert w._transport.block_target is None
+    assert w._transport.lid_target is None
+
+
+def test_stop_while_idle_is_silent():
+    """Stopping with nothing running must not report a phantom 'Stopped'."""
+    import queue
+    w = tc.Worker(queue.Queue())
+    w._transport = tc.SimulatorTransport()
+    w._handle("stop_run", {})
+    assert not any(m["kind"] == "run_finished" for m in _drain(w))
+
+
+def test_hold_phase_issues_no_serial_traffic():
+    """Holding needs no temperature reads - the module maintains the target."""
+    class Counting(tc.SimulatorTransport):
+        def __init__(self):
+            super().__init__()
+            self.calls = []
+
+        def send(self, cmd, timeout=None):
+            self.calls.append(cmd.split()[0])
+            return super().send(cmd, timeout)
+
+    import queue, time
+    w = tc.Worker(queue.Queue())
+    w._transport = Counting()
+    w._start_run([{"label": "h", "temp": 23.0, "seconds": 600}], 25.0, None, False)
+    w._tick_run()                              # issues the M104
+    w._transport.calls.clear()
+    w._block_current, w._block_at = 23.0, time.time()
+    w._phase = "hold"
+    w._hold_end = time.time() + 600
+    for _ in range(50):
+        w._tick_run()
+    assert w._transport.calls == [], f"hold polled the device: {w._transport.calls}"
+
+
+def test_worker_is_joinable():
+    """Worker must not shadow Thread._stop, or join() raises TypeError."""
+    import queue
+    w = tc.Worker(queue.Queue())
+    w.start()
+    w.shutdown()
+    w.join(timeout=3.0)
+    assert not w.is_alive()
+
+
 if __name__ == "__main__":
     import sys
     funcs = [v for k, v in sorted(globals().items()) if k.startswith("test_")]

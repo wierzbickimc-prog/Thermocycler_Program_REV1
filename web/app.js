@@ -31,6 +31,25 @@ const esc = s => String(s ?? "").replace(/[&<>"']/g,
   c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const clone = o => JSON.parse(JSON.stringify(o));
 
+function fmtDuration(totalSeconds) {
+  const seconds = Math.max(0, Math.ceil(Number(totalSeconds) || 0));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.ceil(seconds / 60);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest ? `${hours}h ${rest}m` : `${hours}h`;
+}
+
+function fmtCompletion(epochSeconds) {
+  const date = new Date(Number(epochSeconds) * 1000);
+  if (Number.isNaN(date.getTime())) return "—";
+  const now = new Date();
+  const time = date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  return date.toDateString() === now.toDateString() ? time :
+    `${date.toLocaleDateString([], { weekday: "short" })} ${time}`;
+}
+
 let toastTimer = null;
 function toast(msg, isError = false) {
   toastEl.textContent = msg;
@@ -155,6 +174,10 @@ function renderLanding() {
             </div>
           </div>
           <div class="card-status"></div>
+          <div class="card-eta" hidden>
+            <div><span>Total remaining</span><b class="eta-remaining"></b></div>
+            <div><span class="eta-clock-label">Est. completion</span><b class="eta-clock"></b></div>
+          </div>
           <div class="progress"><i style="width:0"></i></div>`;
         card.addEventListener("click", () => { location.hash = `#/device/${d.id}`; });
         card.querySelector(".sim-toggle").addEventListener("click", async ev => {
@@ -186,6 +209,19 @@ function renderLanding() {
         d.lid_target != null ? `target ${fmtTemp(d.lid_target)}${u}` : "no target";
       card.querySelector(".card-status").textContent =
         d.error ? d.error : (d.running ? d.run_label : `Lid ${d.lid_status}`);
+      const eta = card.querySelector(".card-eta");
+      eta.hidden = !d.running;
+      if (d.running) {
+        const finalHold = d.run_completion_kind === "final_hold";
+        const indefinite = d.run_completion_kind === "indefinite";
+        card.querySelector(".eta-remaining").textContent = indefinite ? "Indefinite" :
+          (finalHold && d.run_remaining_s === 0 ? "Final hold" :
+            (d.run_remaining_s == null ? "Calculating…" : fmtDuration(d.run_remaining_s)));
+        card.querySelector(".eta-clock-label").textContent =
+          finalHold ? "Est. final hold" : "Est. completion";
+        card.querySelector(".eta-clock").textContent = indefinite ? "—" :
+          (d.run_completion_at == null ? "Calculating…" : fmtCompletion(d.run_completion_at));
+      }
       const pct = d.step_total ? (d.step_index / d.step_total) * 100 : 0;
       card.querySelector(".progress > i").style.width = `${d.running ? pct : 0}%`;
       cyclers.get(d.id).update(d);

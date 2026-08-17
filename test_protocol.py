@@ -1,6 +1,7 @@
 """Unit tests for the pure protocol helpers (no hardware / GUI needed)."""
 import thermocycler_core as tc
 import profiles as profile_lib
+import devices as device_lib
 
 
 def test_build_set_block_temp_only():
@@ -113,6 +114,34 @@ def test_flatten_profile_cycles():
     assert flat[0]["seconds"] == 180
     assert flat[-1]["seconds"] is None          # 0 -> indefinite hold
     assert "cycle 2/3" in flat[3]["label"]
+
+
+def test_run_eta_includes_future_holds_and_ramps():
+    steps = [
+        {"label": "hot", "temp": 95.0, "seconds": 60},
+        {"label": "anneal", "temp": 55.0, "seconds": 30},
+        {"label": "final hold", "temp": 4.0, "seconds": None},
+    ]
+    remaining, kind = device_lib.estimate_run_remaining(
+        steps, index=0, phase="hold", step_remaining=20,
+        block_current=95.0, simulated=True)
+    assert remaining == 73
+    assert kind == "final_hold"
+
+
+def test_run_eta_accounts_for_lid_preheat():
+    steps = [{"label": "step", "temp": 25.0, "seconds": 10}]
+    remaining, kind = device_lib.estimate_run_remaining(
+        steps, phase="preheat", block_current=23.0,
+        lid_current=23.0, lid_target=105.0, simulated=True)
+    assert remaining == 43
+    assert kind == "complete"
+
+
+def test_run_eta_marks_terminal_indefinite_hold_reached():
+    steps = [{"label": "final hold", "temp": 4.0, "seconds": None}]
+    assert device_lib.estimate_run_remaining(
+        steps, phase="hold_inf", block_current=4.0) == (0, "final_hold")
 
 
 def test_simulator_roundtrip():

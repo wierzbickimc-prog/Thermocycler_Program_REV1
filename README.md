@@ -11,6 +11,17 @@ Two front-ends share one hardware layer (`thermocycler_core.py`):
 | **BUILT DNA console** | `python serve.py` | Multi-instrument web UI in BUILT branding — **recommended** |
 | Legacy desktop app | `python thermocycler_gui.py` | Single-instrument Tkinter window |
 
+## macOS double-click test build
+
+Download the macOS zip from the
+[v0.1.0-beta.1 release](https://github.com/wierzbickimc-prog/Thermocycler_Program_REV1/releases/tag/v0.1.0-beta.1),
+unzip it, then Control-click **BUILT DNA Thermocycler.app** and choose **Open**.
+The first launch downloads a checksum-verified private Python runtime and
+installs the bundled USB serial dependency under your user Library. It needs no
+Homebrew, Xcode, administrator password, or preinstalled Python and supports
+both Apple Silicon and Intel Macs. Keep the Terminal window open while using the
+console; press Control-C there to stop it safely.
+
 ## BUILT DNA console
 
 ```bash
@@ -35,7 +46,8 @@ Events; the page is a small ES-module SPA under `web/`.
 </table>
 
 - **Instrument grid** — every connected thermocycler on one screen with live
-  block/lid temperatures, run progress and lid state. Click a card to open it.
+  block/lid temperatures, run progress, total estimated time remaining,
+  projected completion time and lid state. Click a card to open it.
 - **Animated instrument** — an isometric SVG of the module that reflects real
   state: the lid swings open and shut with `M126`/`M127`, the 96 wells tint with
   block temperature, and the chassis glows as it heats.

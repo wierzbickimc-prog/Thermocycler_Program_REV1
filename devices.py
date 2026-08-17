@@ -11,6 +11,7 @@ back to the port path.  Nicknames live in ~/.builtdna/devices.json.
 """
 
 import json
+import math
 import os
 import queue
 import threading
@@ -33,6 +34,92 @@ SIM_IDS = tuple(f"sim-{n}" for n in range(1, _SIM_COUNT + 1))
 
 # Ports that are never a thermocycler; probing them is slow and rude.
 _PORT_DENY = ("bluetooth", "debug-console", "wlan-debug", "airpods")
+
+# ETA assumptions. The block values are the module's documented maximum ramp
+# rates; estimates continuously tighten from live temperatures during a run.
+# Lid heat-up is slower and has no published ramp guarantee, so use a
+# deliberately conservative nominal rate. The simulator's rates match its model.
+BLOCK_HEAT_C_PER_S = 4.25
+BLOCK_COOL_C_PER_S = 2.0
+LID_HEAT_C_PER_S = 1.0
+SIM_BLOCK_C_PER_S = 4.0
+SIM_LID_C_PER_S = 2.5
+
+
+def _ramp_seconds(start, target, heat_rate, cool_rate):
+    """Approximate seconds to move between temperatures."""
+    if start is None or target is None:
+        return 0.0
+    delta = float(target) - float(start)
+    if abs(delta) <= Worker.REACH_TOLERANCE:
+        return 0.0
+    rate = heat_rate if delta > 0 else cool_rate
+    return max(0.0, abs(delta) - Worker.REACH_TOLERANCE) / rate
+
+
+def estimate_run_remaining(steps, index=0, phase=None, step_remaining=None,
+                           block_current=None, lid_current=None,
+                           lid_target=None, simulated=False):
+    """Return ``(seconds, kind)`` for a running flattened profile.
+
+    ``kind`` is ``complete`` for a finite profile, ``final_hold`` when the
+    estimate ends upon reaching a terminal indefinite hold, or ``indefinite``
+    when an indefinite hold prevents a completion estimate.
+    """
+    if not steps:
+        return None, None
+
+    idx = max(0, min(int(index), len(steps) - 1))
+    block_heat = SIM_BLOCK_C_PER_S if simulated else BLOCK_HEAT_C_PER_S
+    block_cool = SIM_BLOCK_C_PER_S if simulated else BLOCK_COOL_C_PER_S
+    lid_heat = SIM_LID_C_PER_S if simulated else LID_HEAT_C_PER_S
+    total = 0.0
+
+    def add_step(step, start_temp, remaining_override=None):
+        ramp = _ramp_seconds(start_temp, step["temp"], block_heat, block_cool)
+        seconds = step.get("seconds")
+        if seconds is None or seconds <= 0:
+            return ramp, False
+        dwell = seconds if remaining_override is None else max(0, remaining_override)
+        return ramp + dwell, True
+
+    if phase == "preheat":
+        total += _ramp_seconds(lid_current, lid_target, lid_heat, lid_heat)
+        next_idx = idx
+        previous_temp = block_current
+    else:
+        current = steps[idx]
+        if phase == "hold_inf":
+            return ((0, "final_hold") if idx == len(steps) - 1
+                    else (None, "indefinite"))
+        if phase == "hold":
+            seconds = current.get("seconds")
+            if seconds is None or seconds <= 0:
+                return ((0, "final_hold") if idx == len(steps) - 1
+                        else (None, "indefinite"))
+            total += max(0, step_remaining if step_remaining is not None else seconds)
+        else:
+            duration, finite = add_step(current, block_current)
+            total += duration
+            if not finite:
+                return ((math.ceil(total), "final_hold") if idx == len(steps) - 1
+                        else (None, "indefinite"))
+        previous_temp = current["temp"]
+        next_idx = idx + 1
+
+    kind = "complete"
+    for n in range(next_idx, len(steps)):
+        step = steps[n]
+        duration, finite = add_step(step, previous_temp)
+        total += duration
+        if not finite:
+            if n == len(steps) - 1:
+                kind = "final_hold"
+                break
+            return None, "indefinite"
+        previous_temp = step["temp"]
+
+    return math.ceil(total), kind
 
 
 def _is_candidate(device, description):
@@ -89,6 +176,10 @@ class Device:
         self.step_index = 0
         self.step_total = 0
         self.remaining = None
+        self.run_remaining_s = None
+        self.run_completion_kind = None
+        self._profile_steps = []
+        self._profile_lid_target = None
         self.history = []                # [(t, block, lid)]
         self.log = []                    # last N log lines
         self.profile_name = None
@@ -134,6 +225,10 @@ class Device:
                 self.connected = False
                 self.running = False
                 self.run_label = "Idle"
+                self.run_remaining_s = None
+                self.run_completion_kind = None
+                self._profile_steps = []
+                self._profile_lid_target = None
             elif kind == "connect_failed":
                 self.connected = False
                 self.error = msg.get("text")
@@ -143,6 +238,8 @@ class Device:
                 self.running = True
                 self.step_total = msg["total"]
                 self.step_index = 0
+                self.run_phase = None
+                self.remaining = None
                 self.run_label = "Starting"
             elif kind == "run_step":
                 self.run_phase = msg["phase"]
@@ -153,6 +250,10 @@ class Device:
                 self.running = False
                 self.run_phase = None
                 self.remaining = None
+                self.run_remaining_s = None
+                self.run_completion_kind = None
+                self._profile_steps = []
+                self._profile_lid_target = None
                 self.run_label = "Stopped" if msg.get("aborted") else "Complete"
             elif kind == "log":
                 self.log.append({"t": time.time(), "text": msg["text"],
@@ -192,6 +293,9 @@ class Device:
             raise ValueError("Profile has no steps.")
         with self._lock:
             self.profile_name = profile.get("name")
+            self._profile_steps = list(steps)
+            self._profile_lid_target = (profile.get("lid_temp")
+                                        if profile.get("preheat_lid", True) else None)
         self.worker.submit("run_profile", steps=steps,
                            volume=profile.get("volume"),
                            lid_temp=profile.get("lid_temp"),
@@ -205,6 +309,14 @@ class Device:
     # -- serialisation -----------------------------------------------------
     def snapshot(self, with_history=False, with_log=False):
         with self._lock:
+            if self.running:
+                self.run_remaining_s, self.run_completion_kind = estimate_run_remaining(
+                    self._profile_steps, index=self.step_index,
+                    phase=self.run_phase, step_remaining=self.remaining,
+                    block_current=self.block_current, lid_current=self.lid_current,
+                    lid_target=self._profile_lid_target, simulated=self.simulated)
+            completion_at = (time.time() + self.run_remaining_s
+                             if self.run_remaining_s is not None else None)
             data = {
                 "id": self.id, "name": self.name, "port": self.port,
                 "simulated": self.simulated, "connected": self.connected,
@@ -218,6 +330,9 @@ class Device:
                 "run_phase": self.run_phase,
                 "step_index": self.step_index, "step_total": self.step_total,
                 "remaining": self.remaining,
+                "run_remaining_s": self.run_remaining_s,
+                "run_completion_at": completion_at,
+                "run_completion_kind": self.run_completion_kind,
                 "profile_name": self.profile_name,
                 "error": self.error,
             }

@@ -1,0 +1,11 @@
+#!/bin/bash
+
+set -u
+
+RESOURCE_DIR="$(cd "$(dirname "$0")/../Resources" && pwd)"
+START_COMMAND="$RESOURCE_DIR/Start BUILT DNA Thermocycler.command"
+
+if ! /usr/bin/open -a Terminal "$START_COMMAND"; then
+  /usr/bin/osascript -e 'display alert "BUILT DNA Thermocycler could not start" message "Open the app package and run the Start command from Contents/Resources, or download the release again." as critical' >/dev/null 2>&1 || true
+  exit 1
+fi

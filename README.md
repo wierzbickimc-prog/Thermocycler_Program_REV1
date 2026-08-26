@@ -11,6 +11,17 @@ Two front-ends share one hardware layer (`thermocycler_core.py`):
 | **BUILT DNA console** | `python serve.py` | Multi-instrument web UI in BUILT branding — **recommended** |
 | Legacy desktop app | `python thermocycler_gui.py` | Single-instrument Tkinter window |
 
+## macOS double-click test build
+
+Download the macOS zip from the
+[v0.1.0-beta.1 release](https://github.com/wierzbickimc-prog/Thermocycler_Program_REV1/releases/tag/v0.1.0-beta.1),
+unzip it, then Control-click **BUILT DNA Thermocycler.app** and choose **Open**.
+The first launch downloads a checksum-verified private Python runtime and
+installs the bundled USB serial dependency under your user Library. It needs no
+Homebrew, Xcode, administrator password, or preinstalled Python and supports
+both Apple Silicon and Intel Macs. Keep the Terminal window open while using the
+console; press Control-C there to stop it safely.
+
 ## BUILT DNA console
 
 ```bash
@@ -35,7 +46,8 @@ Events; the page is a small ES-module SPA under `web/`.
 </table>
 
 - **Instrument grid** — every connected thermocycler on one screen with live
-  block/lid temperatures, run progress and lid state. Click a card to open it.
+  block/lid temperatures, run progress, total estimated time remaining,
+  projected completion time and lid state. Click a card to open it.
 - **Animated instrument** — an isometric SVG of the module that reflects real
   state: the lid swings open and shut with `M126`/`M127`, the 96 wells tint with
   block temperature, and the chassis glows as it heats.
@@ -54,7 +66,33 @@ Events; the page is a small ES-module SPA under `web/`.
 - **Busy-machine guard** — starting a run on an instrument that is already
   running or holding a target asks for confirmation first and lists exactly what
   it is doing before overriding.
+- **Power-loss recovery** — every active run is transactionally checkpointed to
+  `~/.builtdna/runs.sqlite3`, including its profile, current step/phase, remaining
+  hold time, event log, and temperature telemetry. Missing or malformed serial
+  acknowledgements are treated as a communication loss. The console watches for
+  the USB instrument to return, verifies fresh telemetry, restores the profile's
+  required lid position, and resumes automatically. A persistent GUI notice records
+  the detected-loss time, automatic-resume time, and interrupted cycle/step number.
+- **PDF run reports** — the Log tab exports the latest run as a standalone PDF
+  containing its status, profile steps, interruptions/resumes, telemetry summary,
+  sampled temperature trace, and event log. PDF generation uses the standard
+  library, so the web console retains its single `pyserial` dependency.
 - **Deep links** — `#/device/<id>/graph`, `/qc` and `/log` address a specific tab.
+
+### Recovery limitations
+
+The checkpoint answers *where the software was*; it cannot prove that samples
+remained within a valid thermal envelope while the module was unpowered. Resume
+therefore re-preheats the lid (when configured), ramps the current block step back
+to target, and only then continues the saved remaining hold. Treat every resumed
+run as thermally interrupted, keep the PDF with the run record, and validate or
+repeat critical assays according to your lab's procedure.
+
+For unattended operation, also disable laptop sleep while connected to AC power,
+use a strain-relieved USB cable, keep the database on a backed-up local disk, and
+consider a small UPS for the thermocycler itself. A laptop battery keeps monitoring
+and checkpointing alive, but it cannot keep the samples at temperature when power
+to the module is lost.
 
 ## Thermal QC
 
@@ -151,6 +189,7 @@ build profiles, and watch the graph without the instrument.
 |------|---------|
 | `thermocycler_gui.py`   | The Tkinter GUI (front-end only). |
 | `thermocycler_core.py`  | Serial protocol, simulator, and the background control worker. No GUI dependency — importable/reusable/testable on its own. |
+| `run_history.py`        | SQLite run journal, crash checkpoints, and PDF report generation for the web console. |
 | `test_protocol.py`      | Unit + integration tests for the protocol and profile logic. Run: `python test_protocol.py`. |
 | `requirements.txt`      | `pyserial`, `matplotlib`. |
 

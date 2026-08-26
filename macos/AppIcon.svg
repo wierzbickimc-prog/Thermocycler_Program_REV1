@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#3A2740"/>
+      <stop offset="1" stop-color="#150C18"/>
+    </linearGradient>
+    <linearGradient id="pink" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#EF58F1"/>
+      <stop offset="1" stop-color="#B524C8"/>
+    </linearGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="24" stdDeviation="28" flood-color="#000" flood-opacity=".42"/>
+    </filter>
+  </defs>
+  <rect x="52" y="52" width="920" height="920" rx="210" fill="url(#bg)"/>
+  <circle cx="512" cy="512" r="350" fill="#E034E3" opacity=".08"/>
+  <g filter="url(#shadow)">
+    <path d="M258 258h222v222H258z" fill="url(#pink)"/>
+    <path d="M258 258h222v222z" fill="#8E1F91"/>
+    <path d="M544 258h222v222H544z" fill="url(#pink)"/>
+    <path d="M766 258v222H544z" fill="#8E1F91"/>
+    <path d="M258 544h222v222H258z" fill="url(#pink)"/>
+    <path d="M480 544v222H258z" fill="#8E1F91"/>
+    <path d="M544 544h222v222H544z" fill="url(#pink)"/>
+    <path d="M544 544h222v222z" fill="#8E1F91"/>
+  </g>
+</svg>

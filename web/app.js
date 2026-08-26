@@ -31,6 +31,43 @@ const esc = s => String(s ?? "").replace(/[&<>"']/g,
   c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const clone = o => JSON.parse(JSON.stringify(o));
 
+function fmtDuration(totalSeconds) {
+  const seconds = Math.max(0, Math.ceil(Number(totalSeconds) || 0));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.ceil(seconds / 60);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest ? `${hours}h ${rest}m` : `${hours}h`;
+}
+
+function fmtCompletion(epochSeconds) {
+  const date = new Date(Number(epochSeconds) * 1000);
+  if (Number.isNaN(date.getTime())) return "—";
+  const now = new Date();
+  const time = date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  return date.toDateString() === now.toDateString() ? time :
+    `${date.toLocaleDateString([], { weekday: "short" })} ${time}`;
+}
+
+function fmtRecovery(notice) {
+  if (!notice) return "";
+  const lost = new Date(notice.lost_at * 1000).toLocaleString();
+  const cycle = notice.cycle && notice.cycles
+    ? `cycle ${notice.cycle}/${notice.cycles}` : "an unknown cycle";
+  const step = `step ${(notice.step_index || 0) + 1}/${notice.step_total || "?"}`;
+  const prefix = String(notice.reason || "").includes("by operator")
+    ? "Run interruption" : "Thermocycler power/communication loss";
+  if (notice.resumed_at) {
+    const resumed = new Date(notice.resumed_at * 1000).toLocaleString();
+    const mode = notice.automatic ? "Automatically resumed" : "Resumed";
+    return `${prefix} detected at ${lost} during ${cycle} (${step}). ` +
+      `${mode} at ${resumed}.`;
+  }
+  return `${prefix} detected at ${lost} during ${cycle} (${step}). ` +
+    "The run will resume automatically after communication and telemetry return.";
+}
+
 let toastTimer = null;
 function toast(msg, isError = false) {
   toastEl.textContent = msg;
@@ -67,6 +104,7 @@ function statusPill(d) {
   if (d.error) return `<span class="pill pill-err">Error</span>`;
   if (!d.connected) return `<span class="pill pill-off">Offline</span>`;
   if (d.running) return `<span class="pill pill-run">Running</span>`;
+  if (d.resume_available) return `<span class="pill pill-err">Resume available</span>`;
   return `<span class="pill pill-idle">Idle</span>`;
 }
 
@@ -74,6 +112,8 @@ function statusPill(d) {
 function busyReasons(d) {
   const out = [];
   if (d.running) out.push(`Running <b>${esc(d.profile_name || "a profile")}</b> — ${esc(d.run_label)}`);
+  if (d.resume_available)
+    out.push(`An interrupted <b>${esc(d.resume?.profile_name || "profile")}</b> run has a saved checkpoint`);
   if (d.block_target !== null && d.block_target !== undefined)
     out.push(`Block held at <b>${d.block_target.toFixed(1)} °C</b>`);
   if (d.lid_target !== null && d.lid_target !== undefined)
@@ -155,6 +195,11 @@ function renderLanding() {
             </div>
           </div>
           <div class="card-status"></div>
+          <div class="card-recovery" hidden></div>
+          <div class="card-eta" hidden>
+            <div><span>Total remaining</span><b class="eta-remaining"></b></div>
+            <div><span class="eta-clock-label">Est. completion</span><b class="eta-clock"></b></div>
+          </div>
           <div class="progress"><i style="width:0"></i></div>`;
         card.addEventListener("click", () => { location.hash = `#/device/${d.id}`; });
         card.querySelector(".sim-toggle").addEventListener("click", async ev => {
@@ -185,7 +230,28 @@ function renderLanding() {
       card.querySelector(".ro-lid-t").textContent =
         d.lid_target != null ? `target ${fmtTemp(d.lid_target)}${u}` : "no target";
       card.querySelector(".card-status").textContent =
-        d.error ? d.error : (d.running ? d.run_label : `Lid ${d.lid_status}`);
+        d.error ? d.error : (d.running
+          ? (d.recovery_notice?.resumed_at
+              ? `Recovered cycle ${d.recovery_notice.cycle || "?"} · ${d.run_label}`
+              : d.run_label) :
+          (d.resume_available ? "Interrupted run ready to resume" : `Lid ${d.lid_status}`));
+      const recovery = card.querySelector(".card-recovery");
+      recovery.hidden = !d.recovery_notice;
+      recovery.classList.toggle("recovered", !!d.recovery_notice?.resumed_at);
+      if (d.recovery_notice) recovery.textContent = fmtRecovery(d.recovery_notice);
+      const eta = card.querySelector(".card-eta");
+      eta.hidden = !d.running;
+      if (d.running) {
+        const finalHold = d.run_completion_kind === "final_hold";
+        const indefinite = d.run_completion_kind === "indefinite";
+        card.querySelector(".eta-remaining").textContent = indefinite ? "Indefinite" :
+          (finalHold && d.run_remaining_s === 0 ? "Final hold" :
+            (d.run_remaining_s == null ? "Calculating…" : fmtDuration(d.run_remaining_s)));
+        card.querySelector(".eta-clock-label").textContent =
+          finalHold ? "Est. final hold" : "Est. completion";
+        card.querySelector(".eta-clock").textContent = indefinite ? "—" :
+          (d.run_completion_at == null ? "Calculating…" : fmtCompletion(d.run_completion_at));
+      }
       const pct = d.step_total ? (d.step_index / d.step_total) * 100 : 0;
       card.querySelector(".progress > i").style.width = `${d.running ? pct : 0}%`;
       cyclers.get(d.id).update(d);
@@ -440,8 +506,10 @@ function renderControl(id, initialTab = "profile") {
               <div style="display:flex;gap:9px;align-items:center;margin-top:16px">
                 <button class="btn btn-primary" id="run-btn">▶ Run profile</button>
                 <button class="btn btn-danger" id="stop-btn">■ Stop</button>
+                <button class="btn" id="resume-btn" hidden>↻ Resume interrupted run</button>
                 <span id="run-status" style="color:var(--ink-soft);font-size:13px"></span>
               </div>
+              <div class="recovery-note" id="recovery-note" hidden></div>
               <div class="progress" style="margin-top:12px"><i id="run-bar" style="width:0"></i></div>
             </div>
 
@@ -455,7 +523,13 @@ function renderControl(id, initialTab = "profile") {
 
             <div data-pane="qc" hidden><div id="qc-host"></div></div>
 
-            <div data-pane="log" hidden><div class="log" id="log"></div></div>
+            <div data-pane="log" hidden>
+              <div class="log-tools">
+                <span>Live command log</span>
+                <a class="btn btn-sm" id="report-link">Export latest run PDF</a>
+              </div>
+              <div class="log" id="log"></div>
+            </div>
           </div>
         </div>
       </div>
@@ -572,6 +646,39 @@ function renderControl(id, initialTab = "profile") {
 
     if (dirty) toast("Running unsaved edits — save the profile to keep them.");
     await act(id, "run_profile", { profile: profileToRun });
+  };
+
+  document.getElementById("resume-btn").onclick = async () => {
+    let d = deviceById(id);
+    if (!d || !d.resume_available || !d.resume) return;
+    const checkpoint = d.resume;
+    const required = checkpoint.lid_position || "closed";
+    if (d.lid_status !== required) {
+      const closing = required === "closed";
+      const move = await confirmDialog({
+        title: `${closing ? "Close" : "Open"} lid before resuming?`,
+        body: `The interrupted profile requires the lid ${required}.`,
+        ok: closing ? "Close lid" : "Open lid", cancel: "Cancel",
+      });
+      if (!move) return;
+      await act(id, closing ? "close_lid" : "open_lid");
+      if (!await waitForLid(required))
+        return toast(`Lid did not report ${required}; run was not resumed.`, true);
+      d = deviceById(id);
+    }
+    const step = (checkpoint.step_index || 0) + 1;
+    const ok = await confirmDialog({
+      title: "Resume interrupted run?",
+      body: `Resume “${checkpoint.profile_name || "profile"}” from its durable ` +
+            `checkpoint at step ${step}/${checkpoint.step_total || "?"}. ` +
+            "The current step will ramp back to temperature before its saved hold continues.",
+      points: [
+        "A power or thermal interruption may invalidate the samples even when progress is recoverable.",
+        "Record the interruption and evaluate the run before using its results.",
+      ],
+      ok: "Resume from checkpoint", cancel: "Do not resume", danger: true,
+    });
+    if (ok) await act(id, "resume_run");
   };
 
   // ---- rename instrument -------------------------------------------------
@@ -904,6 +1011,17 @@ function renderControl(id, initialTab = "profile") {
     document.getElementById("run-status").textContent = d.run_label;
     document.getElementById("run-btn").disabled = !d.connected || preparingLid;
     document.getElementById("stop-btn").disabled = !d.running;
+    const resumeButton = document.getElementById("resume-btn");
+    resumeButton.hidden = !d.resume_available || d.auto_resume_pending;
+    resumeButton.disabled = !d.connected || d.running || preparingLid;
+    const recoveryNote = document.getElementById("recovery-note");
+    recoveryNote.hidden = !d.recovery_notice;
+    recoveryNote.classList.toggle("recovered", !!d.recovery_notice?.resumed_at);
+    if (d.recovery_notice) recoveryNote.textContent = fmtRecovery(d.recovery_notice);
+    const reportLink = document.getElementById("report-link");
+    reportLink.hidden = !d.latest_run_id;
+    if (d.latest_run_id)
+      reportLink.href = `/api/device/${encodeURIComponent(id)}/run-report.pdf`;
     document.getElementById("run-bar").style.width =
       d.running && d.step_total ? `${(d.step_index / d.step_total) * 100}%` : "0";
     cycler.update(d);
@@ -945,8 +1063,19 @@ function route() {
 }
 
 function onState(next) {
+  const previous = new Map(state.devices.map(d => [d.id, d.recovery_notice]));
   state = next;
   stateLoaded = true;
+  for (const d of state.devices) {
+    const before = previous.get(d.id);
+    const notice = d.recovery_notice;
+    if (!notice) continue;
+    if (!before || before.lost_at !== notice.lost_at) {
+      toast(fmtRecovery(notice), true);
+    } else if (notice.resumed_at && before.resumed_at !== notice.resumed_at) {
+      toast(fmtRecovery(notice));
+    }
+  }
   if (view && view.paint) view.paint();
 }
 

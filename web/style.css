@@ -159,6 +159,11 @@ body {
 .ro-target { font-size: 11px; color: var(--ink-muted); font-variant-numeric: tabular-nums; }
 
 .card-status { margin-top: 14px; font-size: 12px; color: var(--ink-soft); min-height: 17px; }
+.card-recovery { margin-top:9px; padding:8px 9px; border-radius:7px;
+  border:1px solid rgba(232,85,109,.35); background:rgba(232,85,109,.07);
+  color:#FFC9D2; font-size:11px; line-height:1.4; }
+.card-recovery.recovered { border-color:rgba(0,168,120,.35);
+  background:rgba(0,168,120,.07); color:#B9F5DF; }
 .card-eta {
   display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
   margin-top: 10px; padding: 10px 12px; border-radius: 9px;
@@ -236,6 +241,13 @@ input:focus, select:focus { outline: none; border-color: var(--magenta); box-sha
 .log .rx { color: var(--ink-muted); }
 .log .err { color: var(--crit); }
 .log .info { color: var(--violet-soft); }
+.log-tools { display:flex; align-items:center; justify-content:space-between; gap:12px;
+  margin-bottom:12px; color:var(--ink-muted); font-size:12px; }
+.recovery-note { margin-top:12px; padding:10px 12px; border-radius:8px;
+  border:1px solid rgba(232,85,109,.45); background:rgba(232,85,109,.08);
+  color:#FFC9D2; font-size:12px; line-height:1.45; }
+.recovery-note.recovered { border-color:rgba(0,168,120,.45);
+  background:rgba(0,168,120,.08); color:#B9F5DF; }
 
 /* chart */
 .legend { display: flex; gap: 16px; font-size: 12px; color: var(--ink-soft); margin-bottom: 6px; }

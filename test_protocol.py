@@ -2,6 +2,7 @@
 import thermocycler_core as tc
 import profiles as profile_lib
 import devices as device_lib
+import run_history
 
 
 def test_build_set_block_temp_only():
@@ -114,6 +115,7 @@ def test_flatten_profile_cycles():
     assert flat[0]["seconds"] == 180
     assert flat[-1]["seconds"] is None          # 0 -> indefinite hold
     assert "cycle 2/3" in flat[3]["label"]
+    assert flat[3]["cycle"] == 2 and flat[3]["cycles"] == 3
 
 
 def test_run_eta_includes_future_holds_and_ramps():
@@ -289,6 +291,161 @@ def test_worker_is_joinable():
     w.shutdown()
     w.join(timeout=3.0)
     assert not w.is_alive()
+
+
+# ---------------------------------------------------------------------------
+#  Power-loss recovery and durable reporting
+# ---------------------------------------------------------------------------
+def test_serial_transport_requires_acknowledgement():
+    """An unplugged module must not turn an empty serial read into success."""
+    class SilentSerial:
+        def reset_input_buffer(self): pass
+        def write(self, _data): pass
+        def flush(self): pass
+        def read(self, _count): return b""
+
+    transport = object.__new__(tc.SerialTransport)
+    transport._ser = SilentSerial()
+    transport._timeout = 0.01
+    try:
+        transport.send("M105")
+    except TimeoutError as exc:
+        assert "No acknowledgement" in str(exc)
+    else:
+        raise AssertionError("silent serial connection was accepted")
+
+
+def test_communication_loss_emits_resumable_checkpoint():
+    import time
+
+    class FailedTransport:
+        def send(self, _command, timeout=None):
+            raise OSError("USB device disappeared")
+        def close(self): pass
+
+    w = _worker([{"label": "hold", "temp": 25.0, "seconds": 60}])
+    _drain(w)
+    w._phase = "hold"
+    w._hold_end = time.time() + 42
+    w._transport = FailedTransport()
+    assert w._send("M105") is None
+    events = _drain(w)
+    checkpoint = next(m for m in events if m["kind"] == "run_interrupted")
+    assert checkpoint["index"] == 0 and checkpoint["phase"] == "hold"
+    assert 40 <= checkpoint["remaining"] <= 42
+    disconnected = next(m for m in events if m["kind"] == "disconnected")
+    assert disconnected["unexpected"] is True
+
+
+def test_resume_reramps_then_uses_saved_hold_remaining():
+    import queue
+    import time
+
+    steps = [
+        {"label": "first", "temp": 95.0, "seconds": 30},
+        {"label": "second", "temp": 25.0, "seconds": 60},
+    ]
+    w = tc.Worker(queue.Queue())
+    w._transport = tc.SimulatorTransport()
+    w._transport.block_current = 25.0
+    w._start_run(steps, 25.0, None, False, resume_index=1,
+                 resume_phase="hold", resume_remaining=7)
+    w._tick_run()                 # reissue the current step's setpoint
+    assert w._phase == "ramp" and w._transport.block_target == 25.0
+    w._block_current, w._block_at = 25.0, time.time()
+    w._tick_run()                 # at temperature: restore the saved dwell
+    assert w._phase == "hold"
+    assert 6.5 <= w._hold_end - time.time() <= 7.0
+
+
+def test_run_store_recovers_checkpoint_and_builds_pdf():
+    import tempfile
+    from pathlib import Path
+
+    profile = {
+        "name": "Recovery test", "lid_position": "closed",
+        "stages": [{"name": "Hold", "cycles": 1,
+                    "steps": [{"temp": 25.0, "seconds": 60}]}],
+    }
+    steps = tc.flatten_profile(profile["stages"])
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "runs.sqlite3"
+        store = run_history.RunStore(path)
+        run_id = store.start_run("dev-1", "Cycler 1", False, profile, steps)
+        store.update_progress(run_id, 0, 1, "hold", 37)
+        store.add_telemetry(run_id, {
+            "t": 1234.0, "block_current": 25.0, "block_target": 25.0,
+            "lid_current": 100.0, "lid_target": 105.0,
+            "lid_status": "closed",
+        })
+        store.close()             # process ended without a run_finished event
+
+        recovered = run_history.RunStore(path)
+        checkpoint = recovered.latest_resumable("dev-1")
+        assert checkpoint["id"] == run_id
+        assert checkpoint["phase"] == "hold" and checkpoint["remaining_s"] == 37
+        assert checkpoint["interrupted_step_index"] == 0
+        detailed = recovered.get_run(run_id, details=True)
+        pdf = run_history.render_run_pdf(detailed)
+        assert pdf.startswith(b"%PDF-1.4") and pdf.endswith(b"%%EOF\n")
+        assert b"Recovery test" in pdf
+        resumed_at = recovered.resume_run(run_id, automatic=True)
+        resumed = recovered.get_run(run_id)
+        assert resumed["resumed_at"] == resumed_at
+        assert resumed["resume_automatic"] is True
+        resumed_pdf = run_history.render_run_pdf(
+            recovered.get_run(run_id, details=True))
+        assert b"Resumed automatically" in resumed_pdf
+        recovered.close()
+
+
+def test_device_disconnect_reconnect_resume_end_to_end():
+    import tempfile
+    import time
+    from pathlib import Path
+
+    def wait_for(predicate, timeout=4.0):
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if predicate():
+                return
+            time.sleep(0.02)
+        raise AssertionError("timed out waiting for device state")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        store = run_history.RunStore(Path(tmp) / "runs.sqlite3")
+        dev = device_lib.Device("test-sim", "Recovery simulator", None, True,
+                                lambda _id: None, store)
+        try:
+            dev.connect()
+            wait_for(lambda: dev.snapshot()["connected"])
+            profile = {
+                "name": "End-to-end recovery", "lid_position": "closed",
+                "lid_temp": None, "preheat_lid": False, "volume": 25.0,
+                "stages": [{"name": "Cycling", "cycles": 3,
+                            "steps": [{"temp": 23.0, "seconds": 60}]}],
+            }
+            dev.run_profile(profile)
+            wait_for(lambda: dev.snapshot()["run_phase"] == "hold")
+            run_id = dev.snapshot()["latest_run_id"]
+
+            dev.disconnect()
+            wait_for(lambda: dev.snapshot()["resume_available"])
+            assert store.get_run(run_id)["status"] == "interrupted"
+
+            dev.connect()
+            wait_for(lambda: dev.snapshot()["connected"])
+            wait_for(lambda: dev.snapshot()["running"], timeout=5.0)
+            notice = dev.snapshot()["recovery_notice"]
+            assert notice["automatic"] is True
+            assert notice["resumed_at"] >= notice["lost_at"]
+            assert notice["cycle"] == 1 and notice["cycles"] == 3
+            dev.action("stop_run")
+            wait_for(lambda: store.get_run(run_id)["status"] == "stopped")
+            assert store.get_run(run_id)["resume_count"] == 1
+        finally:
+            dev.shutdown()
+            store.close()
 
 
 if __name__ == "__main__":

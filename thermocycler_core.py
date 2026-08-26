@@ -188,6 +188,9 @@ class SerialTransport:
                     break
             elif ok_count >= 1:
                 break  # some builds emit a single 'ok'; accept after a gap
+        if ok_count == 0:
+            raise TimeoutError(
+                f"No acknowledgement from thermocycler within {timeout:.1f} seconds")
         lines = [ln.strip() for ln in re.split(r"[\r\n]+", buf) if ln.strip()]
         data = [ln for ln in lines if ln.lower() != "ok"]
         return " ".join(data)
@@ -279,10 +282,10 @@ class SimulatorTransport:
 def flatten_profile(stages):
     """Expand [{name, cycles, steps:[{temp, seconds}]}] into a linear step list."""
     flat = []
-    for stage in stages:
+    for stage_index, stage in enumerate(stages):
         cycles = max(1, int(stage.get("cycles", 1)))
         for c in range(cycles):
-            for st in stage["steps"]:
+            for step_index, st in enumerate(stage["steps"]):
                 label = stage["name"]
                 if cycles > 1:
                     label += f"  (cycle {c + 1}/{cycles})"
@@ -291,6 +294,11 @@ def flatten_profile(stages):
                     "temp": float(st["temp"]),
                     "seconds": (None if st.get("seconds") in (None, "", 0, "0")
                                 else int(st["seconds"])),
+                    "stage_index": stage_index,
+                    "stage_name": stage["name"],
+                    "cycle": c + 1,
+                    "cycles": cycles,
+                    "stage_step": step_index + 1,
                 })
     return flat
 
@@ -359,6 +367,8 @@ class Worker(threading.Thread):
         self._preheat_target = None
         self._preheat_deadline = 0.0
         self._last_remaining = None   # throttles the hold countdown emit to 1 Hz
+        self._resume_hold = False
+        self._resume_remaining = None
 
     # -- public API (thread-safe: just enqueues) ---------------------------
     def submit(self, action, **kw):
@@ -377,7 +387,7 @@ class Worker(threading.Thread):
 
     def _send(self, command, quiet=False):
         if not self._transport:
-            return ""
+            return None
         try:
             resp = self._transport.send(command)
             if not quiet:
@@ -390,8 +400,8 @@ class Worker(threading.Thread):
         except Exception as exc:
             self._log(f"ERROR sending '{command}': {exc}", "err")
             self._emit("error", text=str(exc))
-            self._disconnect()
-            return ""
+            self._disconnect(reason=f"Communication lost: {exc}", unexpected=True)
+            return None
 
     def _block_temp(self, max_age):
         """Current block temp, reusing the telemetry cache when it is fresh enough.
@@ -429,31 +439,59 @@ class Worker(threading.Thread):
             self._log(f"Connection failed: {exc}", "err")
             self._emit("connect_failed", text=str(exc))
 
-    def _disconnect(self):
+    def _disconnect(self, reason="Disconnected by operator.", unexpected=False):
         # Deliberately does not deactivate: disconnecting while the block holds
         # at 4 C is a legitimate thing to want.  The GUI offers to turn the
         # heaters off on quit instead.
-        self._abort_run(silent=True)
+        if self._run_steps is not None:
+            remaining = None
+            if self._phase == "hold" and self._hold_end is not None:
+                # A serial timeout itself can take several seconds.  Preserve
+                # the last countdown value confirmed before that blocked read,
+                # rather than silently consuming dwell time after power vanished.
+                remaining = (self._last_remaining
+                             if isinstance(self._last_remaining, int)
+                             else max(0, int(math.ceil(
+                                 self._hold_end - time.time()))))
+            self._emit("run_interrupted", index=self._run_idx,
+                       phase=self._phase, remaining=remaining, reason=reason)
+            self._run_steps = None
+            self._phase = None
+            self._hold_end = None
+            self._last_remaining = None
+            self._resume_hold = False
+            self._resume_remaining = None
         if self._transport:
             self._transport.close()
             self._transport = None
-            self._log("Disconnected (module keeps its last commanded state).", "info")
+            direction = "err" if unexpected else "info"
+            self._log(reason + " Module keeps its last commanded state if powered.",
+                      direction)
         self._block_current = self._lid_current = None
-        self._emit("disconnected")
+        self._emit("disconnected", reason=reason, unexpected=unexpected)
 
     # -- profile running ---------------------------------------------------
-    def _start_run(self, steps, volume, lid_temp, preheat_lid):
+    def _start_run(self, steps, volume, lid_temp, preheat_lid,
+                   resume_index=0, resume_phase=None, resume_remaining=None,
+                   resume=False):
         if not self._transport:
             return
         self._run_steps = steps
-        self._run_idx = 0
+        self._run_idx = max(0, min(int(resume_index), len(steps) - 1))
         self._phase = None
         self._hold_end = None
         self._last_remaining = None
         self._run_volume = volume
-        self._log(f"=== Starting profile: {len(steps)} step(s) ===", "info")
+        self._resume_hold = resume_phase in ("hold", "hold_inf")
+        self._resume_remaining = (None if resume_phase == "hold_inf"
+                                  else resume_remaining)
+        resumed = bool(resume or resume_index or resume_phase)
+        verb = "Resuming" if resumed else "Starting"
+        self._log(f"=== {verb} profile: {len(steps)} step(s) ===", "info")
         if lid_temp is not None:
             self._send(build_set_lid(lid_temp))
+            if not self._transport:
+                return
             if preheat_lid:
                 # Actually hold the block steps until the lid is hot; previously
                 # this only logged a message and started heating immediately.
@@ -466,7 +504,10 @@ class Worker(threading.Thread):
             # None means the profile explicitly runs without heated-lid power;
             # do not inherit a target left behind by an earlier manual action.
             self._send(GCODE["deactivate_lid"])
-        self._emit("run_started", total=len(steps))
+            if not self._transport:
+                return
+        self._emit("run_started", total=len(steps), index=self._run_idx,
+                   resumed=resumed)
 
     def _abort_run(self, silent=False, deactivate=False):
         """Stop a running profile.  ``deactivate`` also turns the heaters off."""
@@ -476,6 +517,8 @@ class Worker(threading.Thread):
         self._phase = None
         self._hold_end = None
         self._last_remaining = None
+        self._resume_hold = False
+        self._resume_remaining = None
         if not silent:
             self._log("=== Profile stopped ===", "info")
         if deactivate:
@@ -486,7 +529,9 @@ class Worker(threading.Thread):
 
     def _enter_hold(self, step):
         """Move a step into its hold phase.  ``seconds`` of None/0 holds forever."""
-        secs = step["seconds"]
+        secs = self._resume_remaining if self._resume_hold else step["seconds"]
+        self._resume_hold = False
+        self._resume_remaining = None
         self._hold_end = None if (secs is None or secs <= 0) else time.time() + secs
         self._phase = "hold"
         self._last_remaining = None
@@ -519,6 +564,8 @@ class Worker(threading.Thread):
 
         if self._phase is None:
             self._send(build_set_block(step["temp"], volume_uL=self._run_volume))
+            if not self._transport:
+                return
             self._phase = "ramp"
             self._ramp_deadline = time.time() + self.RAMP_TIMEOUT
             self._emit("run_step", index=self._run_idx, label=step["label"],
@@ -561,9 +608,36 @@ class Worker(threading.Thread):
     def _poll(self):
         if not self._transport:
             return
-        b_cur, b_tgt = parse_temperature(self._send(GCODE["get_block"], quiet=True))
-        l_cur, l_tgt = parse_temperature(self._send(GCODE["get_lid"], quiet=True))
-        lid = parse_lid_status(self._send(GCODE["get_lid_status"], quiet=True))
+        block_reply = self._send(GCODE["get_block"], quiet=True)
+        if block_reply is None:
+            return
+        b_cur, b_tgt = parse_temperature(block_reply)
+        if b_cur is None:
+            self._log("Invalid block-temperature response; communication lost.", "err")
+            self._emit("error", text="Invalid block-temperature response")
+            self._disconnect(reason="Communication lost: invalid block response.",
+                             unexpected=True)
+            return
+        lid_reply = self._send(GCODE["get_lid"], quiet=True)
+        if lid_reply is None:
+            return
+        l_cur, l_tgt = parse_temperature(lid_reply)
+        if l_cur is None:
+            self._log("Invalid lid-temperature response; communication lost.", "err")
+            self._emit("error", text="Invalid lid-temperature response")
+            self._disconnect(reason="Communication lost: invalid lid response.",
+                             unexpected=True)
+            return
+        status_reply = self._send(GCODE["get_lid_status"], quiet=True)
+        if status_reply is None:
+            return
+        lid = parse_lid_status(status_reply)
+        if lid == "unknown":
+            self._log("Invalid lid-status response; communication lost.", "err")
+            self._emit("error", text="Invalid lid-status response")
+            self._disconnect(reason="Communication lost: invalid lid-status response.",
+                             unexpected=True)
+            return
         now = time.time()
         self._block_current, self._block_at = b_cur, now
         self._lid_current, self._lid_at = l_cur, now
@@ -627,6 +701,8 @@ class Worker(threading.Thread):
             self._send(kw["command"])
         elif action == "run_profile":
             self._start_run(kw["steps"], kw.get("volume"),
-                            kw.get("lid_temp"), kw.get("preheat_lid", False))
+                            kw.get("lid_temp"), kw.get("preheat_lid", False),
+                            kw.get("resume_index", 0), kw.get("resume_phase"),
+                            kw.get("resume_remaining"), kw.get("resume", False))
         elif action == "stop_run":
             self._abort_run(deactivate=True)

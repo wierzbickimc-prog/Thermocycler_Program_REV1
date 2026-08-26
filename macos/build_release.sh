@@ -32,7 +32,7 @@ sed -e "s/__SHORT_VERSION__/$SHORT_VERSION/g" \
     "$ROOT/macos/Info.plist.in" > "$APP_PATH/Contents/Info.plist"
 printf 'APPL????' > "$APP_PATH/Contents/PkgInfo"
 
-for source in serve.py devices.py profiles.py qc.py thermocycler_core.py; do
+for source in serve.py devices.py profiles.py qc.py thermocycler_core.py run_history.py; do
   cp "$ROOT/$source" "$APP_PATH/Contents/Resources/app/$source"
 done
 cp -R "$ROOT/web/." "$APP_PATH/Contents/Resources/app/web/"

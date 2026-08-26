@@ -96,10 +96,16 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send(200, body, "text/csv", {
                         "Content-Disposition": 'attachment; filename="thermal-qc.csv"'})
                 dev = MANAGER.get(dev_id)
+                if verb == "run-report.pdf":
+                    return self._send(200, dev.run_report_pdf(), "application/pdf", {
+                        "Content-Disposition":
+                            'attachment; filename="thermocycler-run-report.pdf"'})
                 return self._json(dev.snapshot(with_history=True, with_log=True))
             return self._static(path)
         except KeyError as exc:
             self._error(404, f"Not found: {exc}")
+        except ValueError as exc:
+            self._error(400, str(exc))
         except Exception as exc:
             self._error(500, str(exc))
 
@@ -177,6 +183,8 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError(
                     f"Profile requires the lid {required}; current lid is {actual}.")
             dev.run_profile(prof)
+        elif name == "resume_run":
+            dev.resume_run()
         else:
             raise ValueError(f"Unknown action: {name}")
         return dev.snapshot()
@@ -299,12 +307,14 @@ def main():
                     help="skip probing serial ports at startup")
     args = ap.parse_args()
 
-    MANAGER = DeviceManager()
-    if not args.no_scan:
-        threading.Thread(target=MANAGER.scan, daemon=True).start()
-
     httpd = ThreadingHTTPServer((args.host, args.port), Handler)
     httpd.daemon_threads = True
+    # Bind the listening port before opening/recovering the run database.  A
+    # second accidental launch then fails without touching the active process's
+    # durable checkpoints.
+    MANAGER = DeviceManager()
+    if not args.no_scan:
+        MANAGER.start_monitor()
     url = f"http://{args.host}:{args.port}"
     print(f"BUILT DNA console  ->  {url}")
     print("Ctrl-C to stop.")

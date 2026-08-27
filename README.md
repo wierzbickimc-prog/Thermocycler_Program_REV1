@@ -99,7 +99,9 @@ direct-labelled at the line end, so identity never depends on colour alone.
 - **Block temperature** — set target with optional hold time and sample volume (µL),
   with a large live readout.
 - **Lid temperature** — set target, live readout.
-- **Lid movement** — open, close, plate lift.
+- **Lid movement** — open and close. The GEN1 desktop interface uses the
+  module's manual plate latch; the web console shows automated **Plate lift**
+  only when a connected module identifies as GEN2.
 - **Deactivate** — block, lid, or everything.
 - **PCR profile builder** — stages with repeat cycles (e.g. denature/anneal/extend ×35),
   editable in a tree, saved/loaded as JSON. The runner uses **software-timed holds**:
@@ -166,7 +168,8 @@ commands acknowledged by two `ok` lines.
 | `M140 S<t>` | Set lid temp | |
 | `M141` | Get lid temp | replies `T:<target> C:<current>` |
 | `M119` | Get lid status | replies `Lid:<open\|closed\|in_between>` |
-| `M126` / `M127` / `M128` | Open lid / Close lid / Plate lift | |
+| `M126` / `M127` | Open lid / Close lid | |
+| `M128` | Plate lift | GEN2 only; hidden and rejected for GEN1/unknown hardware |
 | `M14` / `M108` / `M18` | Deactivate block / lid / all | |
 
 ## Safety notes

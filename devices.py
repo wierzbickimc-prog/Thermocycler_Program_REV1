@@ -66,11 +66,14 @@ def _save_registry(reg):
 class Device:
     """A Worker plus the latest state derived from its event stream."""
 
-    def __init__(self, dev_id, name, port, simulated, on_change):
+    def __init__(self, dev_id, name, port, simulated, on_change,
+                 generation=None):
         self.id = dev_id
         self.name = name
         self.port = port
         self.simulated = simulated
+        self.generation = generation
+        self.supports_plate_lift = generation == 2
         self._on_change = on_change
 
         self.out_q = queue.Queue()
@@ -181,6 +184,16 @@ class Device:
         self.worker.submit("disconnect")
 
     def action(self, name, **kw):
+        if name == "plate_lift":
+            if not self.supports_plate_lift:
+                raise ValueError(
+                    "Plate lift is only available on GEN2 thermocyclers.")
+            with self._lock:
+                lid_status = self.lid_status
+            if lid_status != "open":
+                raise ValueError(
+                    "Plate lift cannot be performed unless the lid is fully open "
+                    f"(current lid status: {lid_status}).")
         if name in ("open_lid", "close_lid"):
             with self._lock:
                 self.lid_moving_to = "open" if name == "open_lid" else "closed"
@@ -208,6 +221,8 @@ class Device:
             data = {
                 "id": self.id, "name": self.name, "port": self.port,
                 "simulated": self.simulated, "connected": self.connected,
+                "generation": self.generation,
+                "supports_plate_lift": self.supports_plate_lift,
                 "block_current": self.block_current,
                 "block_target": self.block_target,
                 "lid_current": self.lid_current,
@@ -268,7 +283,7 @@ class DeviceManager:
         for n, sid in enumerate(SIM_IDS, 1):
             name = self._registry.get(sid, {}).get(
                 "name", "Simulator" if len(SIM_IDS) == 1 else f"Simulator {n}")
-            dev = Device(sid, name, None, True, self._changed)
+            dev = Device(sid, name, None, True, self._changed, generation=1)
             self._devices[sid] = dev
             dev.connect()
 
@@ -307,13 +322,20 @@ class DeviceManager:
                 existing = self._devices.get(dev_id)
             if existing is not None:
                 existing.port = port.device
+                generation = core.thermocycler_generation(
+                    usb_pid=getattr(port, "pid", None))
+                if generation is not None:
+                    existing.generation = generation
+                    existing.supports_plate_lift = generation == 2
                 found.append(dev_id)
                 continue
-            if not self._probe(port.device):
+            probe = self._probe(port.device, getattr(port, "pid", None))
+            if probe is None:
                 continue
             name = self._registry.get(dev_id, {}).get(
                 "name", port.description or port.device)
-            dev = Device(dev_id, name, port.device, False, self._changed)
+            dev = Device(dev_id, name, port.device, False, self._changed,
+                         generation=probe["generation"])
             with self._lock:
                 self._devices[dev_id] = dev
             dev.connect()
@@ -322,17 +344,24 @@ class DeviceManager:
         return found
 
     @staticmethod
-    def _probe(port):
-        """True if something on this port answers the lid-status query."""
+    def _probe(port, usb_pid=None):
+        """Return discovered capabilities if the port is a thermocycler."""
         try:
             transport = core.SerialTransport(port, timeout=1.5)
         except Exception:
-            return False
+            return None
         try:
             reply = transport.send(GCODE["get_lid_status"], timeout=1.5)
-            return "lid" in (reply or "").lower()
+            if "lid" not in (reply or "").lower():
+                return None
+            device_info = transport.send(GCODE["get_device_info"], timeout=1.5)
+            return {
+                "generation": core.thermocycler_generation(
+                    device_info, usb_pid),
+                "device_info": device_info,
+            }
         except Exception:
-            return False
+            return None
         finally:
             transport.close()
 

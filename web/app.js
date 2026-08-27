@@ -377,7 +377,9 @@ function renderControl(id, initialTab = "profile") {
             <div class="btn-row">
               <button class="btn" data-act="open_lid">Open</button>
               <button class="btn" data-act="close_lid">Close</button>
-              <button class="btn" data-act="plate_lift">Plate lift</button>
+              ${d0.supports_plate_lift
+                ? '<button class="btn" data-act="plate_lift">Plate lift</button>'
+                : ""}
             </div>
             <h3 style="margin-top:18px">Deactivate</h3>
             <div class="btn-row">
@@ -479,7 +481,22 @@ function renderControl(id, initialTab = "profile") {
   app.querySelectorAll(".tab").forEach(t => { t.onclick = () => showTab(t.dataset.tab); });
 
   // ---- simple actions ---------------------------------------------------
-  app.querySelectorAll("[data-act]").forEach(b => { b.onclick = () => act(id, b.dataset.act); });
+  app.querySelectorAll("[data-act]").forEach(b => {
+    b.onclick = () => {
+      const action = b.dataset.act;
+      if (action === "plate_lift") {
+        const d = deviceById(id);
+        if (!d || d.lid_status !== "open") {
+          const status = d ? d.lid_status : "unknown";
+          return toast(
+            `Plate lift cannot be performed unless the lid is fully open (current lid status: ${status}).`,
+            true,
+          );
+        }
+      }
+      return act(id, action);
+    };
+  });
   document.getElementById("set-block").onclick = () => {
     const temp = parseFloat(document.getElementById("b-temp").value);
     if (Number.isNaN(temp) || temp < BLOCK_MIN || temp > BLOCK_MAX)

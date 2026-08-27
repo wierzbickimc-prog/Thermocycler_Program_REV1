@@ -21,6 +21,18 @@ def test_describe_gcode():
     assert tc.describe_gcode("G999") is None
 
 
+def test_thermocycler_generation_from_usb_pid():
+    assert tc.thermocycler_generation(usb_pid=0xED8C) == 1
+    assert tc.thermocycler_generation(usb_pid=0x800B) == 1
+    assert tc.thermocycler_generation(usb_pid=0xED8D) == 2
+
+
+def test_thermocycler_generation_from_device_info():
+    reply = "M115 FW:v1.1.1 HW: Opentrons Thermocycler Gen2 SerialNo: TC123"
+    assert tc.thermocycler_generation(reply) == 2
+    assert tc.thermocycler_generation("unidentified thermocycler") is None
+
+
 def _minimal_profile(**options):
     return {
         "name": "test",

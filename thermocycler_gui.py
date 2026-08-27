@@ -15,7 +15,7 @@ Features
 * Auto-detected serial-port picker, plus a built-in Simulator for demos.
 * Manual block-temp / lid-temp control with hold time & sample volume, and
   live temperature readouts.
-* Lid open / close / plate-lift, and deactivate block / lid / all.
+* Lid open / close, and deactivate block / lid / all.
 * PCR profile builder (stages with repeat cycles), save/load JSON, and a
   background runner with software-timed holds, step progress and countdown.
 * Real-time block + lid temperature graph.
@@ -65,6 +65,7 @@ class App(tk.Tk):
 
         self.connected = False
         self.running = False
+        self.lid_status = "unknown"
         self._run_total = 0
         self.stages = json.loads(json.dumps(DEFAULT_PROFILE["stages"]))
 
@@ -167,9 +168,7 @@ class App(tk.Tk):
             row=0, column=0, sticky="ew", padx=2)
         ttk.Button(lm, text="Close", command=lambda: self._simple("close_lid")).grid(
             row=0, column=1, sticky="ew", padx=2)
-        ttk.Button(lm, text="Plate lift", command=lambda: self._simple("plate_lift")).grid(
-            row=0, column=2, sticky="ew", padx=2)
-        for c in range(3):
+        for c in range(2):
             lm.columnconfigure(c, weight=1)
 
         dz = ttk.LabelFrame(left, text="Deactivate", padding=8)
@@ -501,6 +500,12 @@ class App(tk.Tk):
     def _simple(self, action):
         if not self._require_connection():
             return
+        if action == "plate_lift" and self.lid_status != "open":
+            messagebox.showwarning(
+                "Plate lift unavailable",
+                "Plate lift cannot be performed unless the lid is fully open "
+                f"(current lid status: {self.lid_status}).")
+            return
         self.worker.submit(action)
 
     def _run_profile(self):
@@ -593,7 +598,8 @@ class App(tk.Tk):
         self.lid_ro.config(text=f"{l_cur:.1f} °C" if l_cur is not None else "-- °C")
         self.block_tgt.config(text=f"target {b_tgt:.1f}" if b_tgt is not None else "target --")
         self.lid_tgt.config(text=f"target {l_tgt:.1f}" if l_tgt is not None else "target --")
-        self.lid_status_lbl.config(text=f"Lid: {msg['lid_status']}")
+        self.lid_status = msg["lid_status"]
+        self.lid_status_lbl.config(text=f"Lid: {self.lid_status}")
         t = msg["t"] - self._t0
         self._hist["t"].append(t)
         self._hist["block"].append(b_cur if b_cur is not None else float("nan"))

@@ -47,6 +47,7 @@ BAUD_RATE = 115200
 TERMINATOR = "\r\n"
 
 GCODE = {
+    "get_device_info": "M115",
     "set_block": "M104",
     "get_block": "M105",
     "set_lid": "M140",
@@ -61,6 +62,7 @@ GCODE = {
 }
 
 GCODE_DESCRIPTIONS = {
+    GCODE["get_device_info"]: "Read device information",
     GCODE["set_block"]: "Set block temperature",
     GCODE["get_block"]: "Read block temperature",
     GCODE["set_lid"]: "Set lid temperature",
@@ -73,6 +75,10 @@ GCODE_DESCRIPTIONS = {
     GCODE["deactivate_lid"]: "Deactivate lid",
     GCODE["deactivate_all"]: "Deactivate all",
 }
+
+# USB product IDs published by Opentrons for the two Thermocycler generations.
+THERMOCYCLER_GEN1_PIDS = frozenset((0xED8C, 0x800B))
+THERMOCYCLER_GEN2_PIDS = frozenset((0xED8D,))
 
 # Physical limits for the GEN 1 module (used for input validation only).
 BLOCK_MIN_C, BLOCK_MAX_C = 4.0, 99.0
@@ -141,6 +147,24 @@ def parse_lid_status(payload):
         if key in kv:
             return kv[key].lower()
     return "unknown"
+
+
+def thermocycler_generation(device_info="", usb_pid=None):
+    """Return 1 or 2 from a USB PID/M115 response, otherwise ``None``.
+
+    Prefer the USB product ID because older GEN1 firmware may not include its
+    generation in the M115 hardware string.
+    """
+    if usb_pid in THERMOCYCLER_GEN1_PIDS:
+        return 1
+    if usb_pid in THERMOCYCLER_GEN2_PIDS:
+        return 2
+    text = re.sub(r"[\s_-]+", " ", device_info or "").lower()
+    if "thermocycler gen2" in text or "thermocycler module v2" in text:
+        return 2
+    if "thermocycler gen1" in text or "thermocycler module v1" in text:
+        return 1
+    return None
 
 
 def available_ports():

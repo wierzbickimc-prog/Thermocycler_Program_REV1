@@ -79,10 +79,12 @@ Events; the page is a small ES-module SPA under `web/`.
   the USB instrument to return, verifies fresh telemetry, restores the profile's
   required lid position, and resumes automatically. A persistent GUI notice records
   the detected-loss time, automatic-resume time, and interrupted cycle/step number.
-- **PDF run reports** — the Log tab exports the latest run as a standalone PDF
-  containing its status, profile steps, interruptions/resumes, telemetry summary,
-  sampled temperature trace, and event log. PDF generation uses the standard
-  library, so the web console retains its single `pyserial` dependency.
+- **PDF run reports** — the Log tab exports the latest run and the Run
+  history page exports any run, as a standalone PDF containing its status,
+  LAB/LPD number, profile steps, interruptions/resumes, telemetry summary, a
+  vector temperature trace, and the event log. PDF generation uses the
+  standard library, so the web console retains its single `pyserial`
+  dependency.
 - **Deep links** — `#/device/<id>/graph`, `/qc`, `/log`, plus `#/history` and
   `#/profiles`, address a specific page.
 

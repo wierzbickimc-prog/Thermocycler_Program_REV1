@@ -359,6 +359,15 @@ input:focus, select:focus { outline: none; border-color: var(--magenta); box-sha
 .tag-std { color: var(--violet-soft); background: rgba(123,92,255,.16); }
 .tag-user { color: var(--jade); background: rgba(0,168,120,.16); }
 .tag-off { color: var(--ink-muted); background: rgba(255,255,255,.07); }
+.history-search {
+  width: 250px; padding: 8px 12px; border-radius: 8px;
+  border: var(--line); background: rgba(0, 0, 0, .28);
+  color: var(--ink); font: 13px var(--font);
+  font-variant-numeric: tabular-nums;
+}
+.history-search::placeholder { color: var(--ink-muted); }
+.history-search:focus { outline: none; border-color: var(--violet); }
+.run-count { color: var(--ink-muted); font-size: 12px; margin: 0 0 12px; }
 
 /* ---------- freedom unit ------------------------------------------------- */
 #freedom-btn {

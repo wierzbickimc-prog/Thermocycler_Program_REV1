@@ -630,8 +630,8 @@ class DeviceManager:
         with self._lock:
             return [self._devices[k] for k in sorted(self._devices)]
 
-    def runs(self, limit=100):
-        return self._runs.list_runs(limit=limit)
+    def runs(self, limit=100, q=None):
+        return self._runs.list_runs(limit=limit, q=q)
 
     def run_report(self, run_id):
         """Return ``(pdf_bytes, filename)`` for any recorded run."""

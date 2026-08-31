@@ -395,6 +395,8 @@ function renderProfiles() {
 // ---------------------------------------------------------------------------
 function renderHistory() {
   let runs = [];
+  let query = "";
+  let searchTimer = null;
 
   const RUN_STATUS = {
     running: ["pill-run", "Running"],
@@ -408,7 +410,11 @@ function renderHistory() {
     return `<span class="pill ${cls}">${esc(label)}</span>`;
   };
 
-  function paint() {
+  function paintList() {
+    const count = document.getElementById("run-count");
+    count.textContent = query
+      ? `${runs.length} run${runs.length === 1 ? "" : "s"} matching “${query}”`
+      : `${runs.length} run${runs.length === 1 ? "" : "s"}, newest first`;
     const rows = runs.map(r => {
       const dur = r.ended_at ? fmtDuration(r.ended_at - r.started_at) : "";
       return `
@@ -425,36 +431,59 @@ function renderHistory() {
         <a class="btn btn-sm" href="/api/runs/${encodeURIComponent(r.id)}/report.pdf">PDF report</a>
       </div>`;
     }).join("");
-
-    app.innerHTML = `
-      <div class="page view">
-        <div class="page-head">
-          <button class="btn btn-sm" id="back">← All instruments</button>
-          <div style="flex:1">
-            <h2>Run history</h2>
-            <p>Every recorded run on this console, newest first. Each PDF report
-               carries the LAB/LPD number, profile steps, telemetry summary and
-               the full event log.</p>
-          </div>
-          <button class="btn btn-sm" id="refresh">Refresh</button>
-        </div>
-        <div class="prof-list">
-          ${rows || '<div class="empty">No runs recorded yet.</div>'}
-        </div>
-      </div>`;
-    document.getElementById("back").onclick = () => { location.hash = "#/"; };
-    document.getElementById("refresh").onclick = load;
+    document.getElementById("run-list").innerHTML = rows || (query
+      ? `<div class="empty">No runs match “${esc(query)}”.<br>
+         Try a different LAB/LPD number, profile or instrument.</div>`
+      : '<div class="empty">No runs recorded yet.</div>');
   }
 
   async function load() {
+    const params = new URLSearchParams();
+    params.set("limit", query ? 200 : 100);
+    if (query) params.set("q", query);
     try {
-      runs = (await api("/api/runs?limit=100")).runs;
+      runs = (await api(`/api/runs?${params}`)).runs;
     } catch (e) {
       toast(e.message, true);
     }
-    paint();
+    paintList();
   }
 
+  app.innerHTML = `
+    <div class="page view">
+      <div class="page-head">
+        <button class="btn btn-sm" id="back">← All instruments</button>
+        <div style="flex:1">
+          <h2>Run history</h2>
+          <p>Every recorded run on this console. Search by LAB/LPD number,
+             profile or instrument — each PDF report carries the full record.</p>
+        </div>
+        <input class="history-search" id="run-search" type="search"
+               placeholder="Search LAB/LPD number…" autocomplete="off">
+        <button class="btn btn-sm" id="refresh">Refresh</button>
+      </div>
+      <div class="run-count" id="run-count"></div>
+      <div class="prof-list" id="run-list"><div class="empty">Loading…</div></div>
+    </div>`;
+  document.getElementById("back").onclick = () => { location.hash = "#/"; };
+  document.getElementById("refresh").onclick = load;
+  const search = document.getElementById("run-search");
+  const runSearch = () => {
+    query = search.value.trim();
+    load();
+  };
+  search.oninput = () => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(runSearch, 250);
+  };
+  search.onkeydown = ev => {
+    if (ev.key === "Enter") {
+      ev.preventDefault();
+      clearTimeout(searchTimer);
+      runSearch();
+    }
+  };
+  search.onsearch = runSearch;   // the × clear button
   load();
   return { kind: "history", paint: () => {} };
 }

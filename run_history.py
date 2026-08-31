@@ -225,15 +225,30 @@ class RunStore:
                 (device_id,)).fetchone()
         return self._decode_run(row) if row else None
 
-    def list_runs(self, limit=100):
-        """Recent runs, newest first, as slim rows (no profile/steps payload)."""
+    def list_runs(self, limit=100, q=None):
+        """Recent runs, newest first, as slim rows (no profile/steps payload).
+
+        ``q`` (when given) case-insensitively matches the LAB/LPD number,
+        profile name, instrument name or run id.
+        """
+        sql = """SELECT id, device_id, device_name, simulated, profile_name,
+                        lab_id, started_at, ended_at, status, step_index,
+                        step_total, phase, resume_count, interruption_reason
+                 FROM runs"""
+        args = []
+        if q:
+            esc = (q.replace("\\", "\\\\").replace("%", "\\%")
+                       .replace("_", "\\_"))
+            like = f"%{esc}%"
+            sql += (" WHERE (lab_id LIKE ? ESCAPE '\\'\n"
+                    "                      OR profile_name LIKE ? ESCAPE '\\'\n"
+                    "                      OR device_name LIKE ? ESCAPE '\\'\n"
+                    "                      OR id LIKE ? ESCAPE '\\')")
+            args = [like, like, like, like]
+        sql += " ORDER BY started_at DESC, id DESC LIMIT ?"
+        args.append(int(limit))
         with self._lock:
-            rows = self._db.execute(
-                """SELECT id, device_id, device_name, simulated, profile_name,
-                          lab_id, started_at, ended_at, status, step_index,
-                          step_total, phase, resume_count, interruption_reason
-                   FROM runs ORDER BY started_at DESC, id DESC LIMIT ?""",
-                (int(limit),)).fetchall()
+            rows = self._db.execute(sql, args).fetchall()
         return [dict(r) for r in rows]
 
     def get_run(self, run_id, details=False):

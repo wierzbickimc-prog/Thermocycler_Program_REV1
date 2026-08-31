@@ -77,7 +77,9 @@ class Handler(BaseHTTPRequestHandler):
                     limit = max(1, min(500, int(raw)))
                 except ValueError:
                     limit = 100
-                return self._json({"runs": MANAGER.runs(limit=limit)})
+                q = (qs.get("q") or [""])[0].strip()
+                return self._json(
+                    {"runs": MANAGER.runs(limit=limit, q=q or None)})
             if path.startswith("/api/runs/") and path.endswith("/report.pdf"):
                 run_id = unquote(path[len("/api/runs/"): -len("/report.pdf")])
                 try:

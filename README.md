@@ -71,7 +71,8 @@ Events; the page is a small ES-module SPA under `web/`.
   control screen, and printed in the PDF report header.
 - **Run history** — a console-wide page (`#/history`) lists every recorded run,
   newest first, with its LAB/LPD number, instrument, duration, step progress and
-  status; any run's PDF report can be downloaded straight from the list.
+  status; searchable by LAB/LPD number, profile or instrument, and any run's
+  PDF report can be downloaded straight from the list.
 - **Power-loss recovery** — every active run is transactionally checkpointed to
   `~/.builtdna/runs.sqlite3`, including its profile, current step/phase, remaining
   hold time, event log, and temperature telemetry. Missing or malformed serial

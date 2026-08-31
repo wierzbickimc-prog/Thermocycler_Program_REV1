@@ -424,6 +424,11 @@ def test_run_store_recovers_checkpoint_and_builds_pdf():
         assert listed and listed[0]["id"] == run_id
         assert listed[0]["lab_id"] == "LAB-123/LPD-456"
         assert "profile" not in listed[0] and "steps" not in listed[0]
+        # Search: case-insensitive match on LAB/LPD, profile, or instrument.
+        assert [r["id"] for r in recovered.list_runs(q="LPD-456")] == [run_id]
+        assert [r["id"] for r in recovered.list_runs(q="recovery")] == [run_id]
+        assert [r["id"] for r in recovered.list_runs(q="cycler")] == [run_id]
+        assert recovered.list_runs(q="no-such-lab") == []
         assert checkpoint["phase"] == "hold" and checkpoint["remaining_s"] == 37
         assert checkpoint["interrupted_step_index"] == 0
         detailed = recovered.get_run(run_id, details=True)

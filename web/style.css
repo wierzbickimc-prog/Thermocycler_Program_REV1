@@ -176,6 +176,18 @@ body {
   text-transform: uppercase;
 }
 .card-eta b { color: var(--ink); font-size: 13px; font-variant-numeric: tabular-nums; }
+.run-eta {
+  display: grid; grid-template-columns: 1.2fr 1fr 1fr; gap: 10px;
+  margin-top: 10px; padding: 10px 12px; border-radius: 9px;
+  background: rgba(0, 0, 0, .2); border: 1px solid rgba(255,255,255,.07);
+}
+.run-eta[hidden] { display: none; }
+.run-eta div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.run-eta span {
+  color: var(--ink-muted); font-size: 9px; letter-spacing: .1em;
+  text-transform: uppercase;
+}
+.run-eta b { color: var(--ink); font-size: 13px; font-variant-numeric: tabular-nums; }
 .progress { height: 3px; border-radius: 2px; background: rgba(255,255,255,.09); margin-top: 10px; overflow: hidden; }
 .progress > i { display: block; height: 100%; background: linear-gradient(90deg, var(--violet), var(--magenta)); transition: width .4s ease; }
 

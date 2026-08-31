@@ -369,6 +369,7 @@ class Worker(threading.Thread):
         self._last_remaining = None   # throttles the hold countdown emit to 1 Hz
         self._resume_hold = False
         self._resume_remaining = None
+        self._lid_cooled = False      # lid heater switched off at the final hold
 
     # -- public API (thread-safe: just enqueues) ---------------------------
     def submit(self, action, **kw):
@@ -485,6 +486,7 @@ class Worker(threading.Thread):
         self._resume_hold = resume_phase in ("hold", "hold_inf")
         self._resume_remaining = (None if resume_phase == "hold_inf"
                                   else resume_remaining)
+        self._lid_cooled = False
         resumed = bool(resume or resume_index or resume_phase)
         verb = "Resuming" if resumed else "Starting"
         self._log(f"=== {verb} profile: {len(steps)} step(s) ===", "info")
@@ -540,6 +542,27 @@ class Worker(threading.Thread):
                    phase=("hold_inf" if self._hold_end is None else "hold"),
                    remaining=(None if self._hold_end is None else secs))
 
+    def _maybe_cool_lid(self, step):
+        """Switch the lid heater off once the profile has reached its final
+        indefinite hold and the block is actually at that hold's setpoint.
+
+        The module has no lid cooling, so deactivating the lid (M108) lets it
+        cool passively to room temperature while the plate stays cold in the
+        block.  Fires at most once per run and never for a mid-profile hold.
+        """
+        if self._lid_cooled or step.get("seconds") is not None:
+            return
+        if self._run_idx != len(self._run_steps) - 1:
+            return
+        cur = self._block_temp(self.POLL_INTERVAL)
+        if cur is None or abs(cur - step["temp"]) > self.REACH_TOLERANCE:
+            return
+        self._lid_cooled = True
+        self._send(GCODE["deactivate_lid"])
+        self._log(f"Block reached its final hold at {step['temp']:.1f} C; "
+                  "lid heater deactivated - the lid will now cool to room "
+                  "temperature.", "info")
+
     def _tick_run(self):
         if self._run_steps is None:
             return
@@ -583,12 +606,15 @@ class Worker(threading.Thread):
 
         if self._phase == "hold":
             # Holding needs no temperature read at all - the module maintains
-            # the target - so this phase costs nothing on the serial link.
+            # the target - so this phase costs nothing on the serial link,
+            # except the final hold, which rechecks the block until the lid
+            # can be let cool (see _maybe_cool_lid).
             if self._hold_end is None:
                 if self._last_remaining != "inf":
                     self._last_remaining = "inf"
                     self._emit("run_step", index=self._run_idx, label=step["label"],
                                temp=step["temp"], phase="hold_inf", remaining=None)
+                self._maybe_cool_lid(step)
                 return
             remaining = self._hold_end - time.time()
             if remaining <= 0:

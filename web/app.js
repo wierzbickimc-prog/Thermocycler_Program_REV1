@@ -511,6 +511,11 @@ function renderControl(id, initialTab = "profile") {
               </div>
               <div class="recovery-note" id="recovery-note" hidden></div>
               <div class="progress" style="margin-top:12px"><i id="run-bar" style="width:0"></i></div>
+              <div class="run-eta" id="run-eta" hidden>
+                <div><span>LAB / LPD</span><b id="run-lab">—</b></div>
+                <div><span>Total remaining</span><b id="eta-remaining"></b></div>
+                <div><span id="eta-clock-label">Est. completion</span><b id="eta-clock"></b></div>
+              </div>
             </div>
 
             <div data-pane="graph" hidden>
@@ -579,7 +584,11 @@ function renderControl(id, initialTab = "profile") {
   // ---- run, with a busy-machine guard -----------------------------------
   let preparingLid = false;
 
-  async function waitForLid(required, timeoutMs = 20000) {
+  // Give the lid a generous window to report its final position: on real
+  // hardware the mechanical travel plus end-stop settle can take well over a
+  // dozen seconds, far longer than the simulator's 2 s move model, and the
+  // telemetry poll itself only refreshes every 1.5 s.
+  async function waitForLid(required, timeoutMs = 30000) {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
       const fresh = await api(`/api/device/${encodeURIComponent(id)}`);
@@ -593,6 +602,14 @@ function renderControl(id, initialTab = "profile") {
   document.getElementById("run-btn").onclick = async () => {
     if (!current) return toast("Choose a profile first", true);
     const profileToRun = clone(current);  // lock the choice while the lid moves
+    const labId = await promptDialog({
+      title: "LAB / LPD number",
+      body: `Required for “${profileToRun.name}”. It is stored with the run ` +
+            `record and printed on the PDF run report.`,
+      ok: "Continue",
+      placeholder: "e.g. LAB-123 / LPD-456",
+    });
+    if (!labId) return toast("A LAB/LPD number is required to start the run.", true);
     const d = deviceById(id);
     if (!d) return;
     const reasons = busyReasons(d);
@@ -645,7 +662,7 @@ function renderControl(id, initialTab = "profile") {
     }
 
     if (dirty) toast("Running unsaved edits — save the profile to keep them.");
-    await act(id, "run_profile", { profile: profileToRun });
+    await act(id, "run_profile", { profile: profileToRun, lab_id: labId });
   };
 
   document.getElementById("resume-btn").onclick = async () => {
@@ -1024,6 +1041,22 @@ function renderControl(id, initialTab = "profile") {
       reportLink.href = `/api/device/${encodeURIComponent(id)}/run-report.pdf`;
     document.getElementById("run-bar").style.width =
       d.running && d.step_total ? `${(d.step_index / d.step_total) * 100}%` : "0";
+    const etaBox = document.getElementById("run-eta");
+    etaBox.hidden = !d.running;
+    if (d.running) {
+      document.getElementById("run-lab").textContent = d.lab_id || "—";
+      const finalHold = d.run_completion_kind === "final_hold";
+      const indefinite = d.run_completion_kind === "indefinite";
+      document.getElementById("eta-remaining").textContent =
+        indefinite ? "Indefinite" :
+        (finalHold && d.run_remaining_s === 0 ? "Final hold" :
+          (d.run_remaining_s == null ? "Calculating…" : fmtDuration(d.run_remaining_s)));
+      document.getElementById("eta-clock-label").textContent =
+        finalHold ? "Est. final hold" : "Est. completion";
+      document.getElementById("eta-clock").textContent =
+        indefinite ? "—" :
+        (d.run_completion_at == null ? "Calculating…" : fmtCompletion(d.run_completion_at));
+    }
     cycler.update(d);
     qcPane.onDeviceUpdate();
 

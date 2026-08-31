@@ -206,6 +206,42 @@ def test_ramp_timeout_keeps_indefinite_hold():
     assert w._run_steps is not None, "step was skipped instead of held"
 
 
+def test_final_cold_hold_cools_the_lid():
+    """The lid heater switches off only once the block actually reaches the
+    final cold hold - and never for a mid-profile hold."""
+    import time
+    steps = [
+        {"label": "Mid hold", "temp": 72.0, "seconds": None},
+        {"label": "4C hold", "temp": 4.0, "seconds": None},
+    ]
+
+    # Mid-profile indefinite hold: even at temperature, the lid stays heated.
+    w = _worker(steps, lid_temp=105.0, preheat=False)
+    w._run_idx = 0
+    w._phase = "hold"
+    w._hold_end = None
+    w._block_current, w._block_at = 72.0, time.time()
+    w._tick_run()
+    assert w._transport.lid_target == 105.0, "mid-run hold must not cool the lid"
+
+    # Final cold hold: while the block is still hot, wait; at target, switch
+    # the lid heater off exactly once.
+    w = _worker(steps, lid_temp=105.0, preheat=False)
+    w._run_idx = 1
+    w._phase = "hold"
+    w._hold_end = None
+    w._block_current, w._block_at = 72.0, time.time()
+    w._tick_run()
+    assert w._transport.lid_target == 105.0, "lid cooled before the block did"
+
+    w._block_current, w._block_at = 4.5, time.time()   # within 1 C tolerance
+    w._tick_run()
+    assert w._transport.lid_target is None, "lid heater not switched off"
+    assert w._lid_cooled is True
+    w._tick_run()                                      # must not re-fire
+    assert w._lid_cooled is True
+
+
 def test_ramp_timeout_emits_progress():
     """The timeout path must still tell the GUI what phase it is in."""
     import time
@@ -371,7 +407,8 @@ def test_run_store_recovers_checkpoint_and_builds_pdf():
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "runs.sqlite3"
         store = run_history.RunStore(path)
-        run_id = store.start_run("dev-1", "Cycler 1", False, profile, steps)
+        run_id = store.start_run("dev-1", "Cycler 1", False, profile, steps,
+                                 lab_id="LAB-123/LPD-456")
         store.update_progress(run_id, 0, 1, "hold", 37)
         store.add_telemetry(run_id, {
             "t": 1234.0, "block_current": 25.0, "block_target": 25.0,
@@ -389,6 +426,7 @@ def test_run_store_recovers_checkpoint_and_builds_pdf():
         pdf = run_history.render_run_pdf(detailed)
         assert pdf.startswith(b"%PDF-1.4") and pdf.endswith(b"%%EOF\n")
         assert b"Recovery test" in pdf
+        assert b"LAB-123/LPD-456" in pdf, "run record lost its LAB/LPD number"
         resumed_at = recovered.resume_run(run_id, automatic=True)
         resumed = recovered.get_run(run_id)
         assert resumed["resumed_at"] == resumed_at

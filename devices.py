@@ -189,6 +189,7 @@ class Device:
         self.profile_name = None
         self.error = None
         self._run_id = None
+        self._run_lab_id = None
         self._last_run_id = None
         self._resume_record = self._runs.latest_resumable(self.id)
         latest = self._runs.latest_run(self.id)
@@ -423,7 +424,7 @@ class Device:
                 self.lid_moving_to = "open" if name == "open_lid" else "closed"
         self.worker.submit(name, **kw)
 
-    def run_profile(self, profile):
+    def run_profile(self, profile, lab_id=None):
         steps = flatten_profile(profile["stages"])
         if not steps:
             raise ValueError("Profile has no steps.")
@@ -433,11 +434,13 @@ class Device:
             if self.running:
                 raise ValueError("Instrument is already running a profile.")
             self.profile_name = profile.get("name")
+            self._run_lab_id = (str(lab_id).strip() if lab_id else "") or None
             self._profile_steps = list(steps)
             self._profile_lid_target = (profile.get("lid_temp")
                                         if profile.get("preheat_lid", True) else None)
             self._run_id = self._runs.start_run(
-                self.id, self.name, self.simulated, profile, steps)
+                self.id, self.name, self.simulated, profile, steps,
+                lab_id=self._run_lab_id)
             self._last_run_id = self._run_id
             self._resume_record = None
             self._recovery_notice = None
@@ -457,6 +460,7 @@ class Device:
             record = self._runs.latest_resumable(self.id)
             if not record:
                 raise ValueError("There is no interrupted run to resume.")
+            self._run_lab_id = record.get("lab_id")
             profile = record["profile"]
             steps = record["steps"]
             required = profile.get("lid_position", "closed")
@@ -531,6 +535,7 @@ class Device:
                 "run_completion_at": completion_at,
                 "run_completion_kind": self.run_completion_kind,
                 "profile_name": self.profile_name,
+                "lab_id": self._run_lab_id,
                 "error": self.error,
                 "resume_available": self._resume_record is not None,
                 "resume": ({

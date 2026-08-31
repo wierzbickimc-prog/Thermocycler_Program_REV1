@@ -41,6 +41,7 @@ class RunStore:
                     device_name TEXT NOT NULL,
                     simulated INTEGER NOT NULL DEFAULT 0,
                     profile_name TEXT,
+                    lab_id TEXT,
                     profile_json TEXT NOT NULL,
                     steps_json TEXT NOT NULL,
                     started_at REAL NOT NULL,
@@ -92,7 +93,8 @@ class RunStore:
                     ("interrupted_at", "REAL"),
                     ("interrupted_step_index", "INTEGER"),
                     ("resumed_at", "REAL"),
-                    ("resume_automatic", "INTEGER NOT NULL DEFAULT 0")):
+                    ("resume_automatic", "INTEGER NOT NULL DEFAULT 0"),
+                    ("lab_id", "TEXT")):
                 if name not in columns:
                     self._db.execute(f"ALTER TABLE runs ADD COLUMN {name} {definition}")
             now = time.time()
@@ -114,9 +116,11 @@ class RunStore:
         with self._lock:
             self._db.close()
 
-    def start_run(self, device_id, device_name, simulated, profile, steps):
+    def start_run(self, device_id, device_name, simulated, profile, steps,
+                  lab_id=None):
         run_id = uuid.uuid4().hex
         now = time.time()
+        lab = (str(lab_id).strip() if lab_id else "") or None
         with self._lock, self._db:
             self._db.execute(
                 """UPDATE runs SET status='superseded', updated_at=?
@@ -124,12 +128,13 @@ class RunStore:
                 (now, device_id))
             self._db.execute(
                 """INSERT INTO runs
-                   (id, device_id, device_name, simulated, profile_name,
+                   (id, device_id, device_name, simulated, profile_name, lab_id,
                     profile_json, steps_json, started_at, updated_at, status,
                     step_index, step_total)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'running', 0, ?)""",
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'running', 0, ?)""",
                 (run_id, device_id, device_name, int(bool(simulated)),
-                 profile.get("name"), json.dumps(profile, separators=(",", ":")),
+                 profile.get("name"), lab,
+                 json.dumps(profile, separators=(",", ":")),
                  json.dumps(steps, separators=(",", ":")), now, now, len(steps)))
             self._event_locked(run_id, now, "started",
                                f"Started profile {profile.get('name') or 'Unnamed'}")
@@ -264,6 +269,7 @@ def render_run_pdf(run):
         f"Run ID: {run['id']}",
         f"Instrument: {run['device_name']} ({run['device_id']})",
         f"Profile: {run.get('profile_name') or 'Unnamed'}",
+        f"Lab/LPD: {run.get('lab_id') or '—'}",
         f"Status: {run['status']}",
         f"Started: {_when(run['started_at'])}",
         f"Last checkpoint: {_when(run['updated_at'])}",

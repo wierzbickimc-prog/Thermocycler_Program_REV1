@@ -172,6 +172,10 @@ class Handler(BaseHTTPRequestHandler):
                       "stop_run"):
             dev.action(name)
         elif name == "run_profile":
+            lab_id = str(body.get("lab_id") or "").strip()
+            if not lab_id:
+                raise ValueError(
+                    "A LAB/LPD number is required to start a profile run.")
             prof = body.get("profile")
             if prof is None:
                 prof = profile_lib.get_profile(body["profile_id"])
@@ -182,7 +186,7 @@ class Handler(BaseHTTPRequestHandler):
             if actual != required:
                 raise ValueError(
                     f"Profile requires the lid {required}; current lid is {actual}.")
-            dev.run_profile(prof)
+            dev.run_profile(prof, lab_id=lab_id)
         elif name == "resume_run":
             dev.resume_run()
         else:

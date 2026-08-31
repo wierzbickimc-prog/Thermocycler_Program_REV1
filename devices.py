@@ -14,8 +14,10 @@ import json
 import math
 import os
 import queue
+import re
 import threading
 import time
+from datetime import datetime
 from pathlib import Path
 
 import thermocycler_core as core
@@ -126,6 +128,12 @@ def estimate_run_remaining(steps, index=0, phase=None, step_remaining=None,
 def _is_candidate(device, description):
     text = f"{device} {description}".lower()
     return not any(bad in text for bad in _PORT_DENY)
+
+
+def _filename_part(text, maxlen=40):
+    """A console-safe fragment for a run-report filename."""
+    clean = re.sub(r'[\\/:*?"<>|\s]+', "-", str(text).strip()).strip("-.")
+    return clean[:maxlen]
 
 
 # ---------------------------------------------------------------------------
@@ -621,6 +629,23 @@ class DeviceManager:
     def devices(self):
         with self._lock:
             return [self._devices[k] for k in sorted(self._devices)]
+
+    def runs(self, limit=100):
+        return self._runs.list_runs(limit=limit)
+
+    def run_report(self, run_id):
+        """Return ``(pdf_bytes, filename)`` for any recorded run."""
+        run = self._runs.get_run(run_id, details=True)
+        if not run:
+            raise KeyError(run_id)
+        stamp = datetime.fromtimestamp(run["started_at"]).strftime(
+            "%Y-%m-%d_%H%M%S")
+        bits = ["thermocycler-run"]
+        if run.get("lab_id"):
+            bits.append(_filename_part(run["lab_id"]))
+        bits.append(_filename_part(run.get("profile_name") or "profile"))
+        bits.append(stamp)
+        return render_run_pdf(run), "-".join(bits) + ".pdf"
 
     def get(self, dev_id):
         with self._lock:

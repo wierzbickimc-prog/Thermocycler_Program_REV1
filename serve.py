@@ -19,7 +19,7 @@ import time
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import unquote, urlparse
+from urllib.parse import unquote, parse_qs, urlparse
 
 import profiles as profile_lib
 import qc as qc_lib
@@ -70,6 +70,22 @@ class Handler(BaseHTTPRequestHandler):
                 return self._events()
             if path == "/api/profiles":
                 return self._json({"profiles": profile_lib.list_profiles()})
+            if path == "/api/runs":
+                qs = parse_qs(urlparse(self.path).query)
+                raw = (qs.get("limit") or ["100"])[0]
+                try:
+                    limit = max(1, min(500, int(raw)))
+                except ValueError:
+                    limit = 100
+                return self._json({"runs": MANAGER.runs(limit=limit)})
+            if path.startswith("/api/runs/") and path.endswith("/report.pdf"):
+                run_id = unquote(path[len("/api/runs/"): -len("/report.pdf")])
+                try:
+                    body, filename = MANAGER.run_report(run_id)
+                except KeyError:
+                    return self._error(404, "No such run")
+                return self._send(200, body, "application/pdf", {
+                    "Content-Disposition": f'attachment; filename="{filename}"'})
             if path == "/api/qc/materials":
                 return self._json({
                     "materials": qc_lib.MATERIALS,

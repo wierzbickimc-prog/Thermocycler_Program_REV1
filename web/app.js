@@ -50,6 +50,13 @@ function fmtCompletion(epochSeconds) {
     `${date.toLocaleDateString([], { weekday: "short" })} ${time}`;
 }
 
+function fmtRunStamp(epochSeconds) {
+  const date = new Date(Number(epochSeconds) * 1000);
+  if (Number.isNaN(date.getTime())) return "—";
+  return date.toLocaleString([], { month: "short", day: "numeric",
+                                    hour: "numeric", minute: "2-digit" });
+}
+
 function fmtRecovery(notice) {
   if (!notice) return "";
   const lost = new Date(notice.lost_at * 1000).toLocaleString();
@@ -145,6 +152,7 @@ function renderLanding() {
           <p id="dev-count"></p>
         </div>
         <div style="flex:1"></div>
+        <a class="btn btn-sm" href="#/history">Run history</a>
         <a class="btn btn-sm" href="#/profiles">Manage profiles</a>
       </div>
       <div class="grid" id="grid"></div>
@@ -380,6 +388,75 @@ function renderProfiles() {
 
   paint();
   return { kind: "profiles", paint: () => {} };
+}
+
+// ---------------------------------------------------------------------------
+//  Run history  (#/history)
+// ---------------------------------------------------------------------------
+function renderHistory() {
+  let runs = [];
+
+  const RUN_STATUS = {
+    running: ["pill-run", "Running"],
+    completed: ["pill-ok", "Completed"],
+    stopped: ["pill-idle", "Stopped"],
+    interrupted: ["pill-err", "Interrupted"],
+    superseded: ["pill-off", "Superseded"],
+  };
+  const runPill = s => {
+    const [cls, label] = RUN_STATUS[s] || ["pill-off", s];
+    return `<span class="pill ${cls}">${esc(label)}</span>`;
+  };
+
+  function paint() {
+    const rows = runs.map(r => {
+      const dur = r.ended_at ? fmtDuration(r.ended_at - r.started_at) : "";
+      return `
+      <div class="prof-row">
+        <div style="flex:1">
+          <b>${esc(r.profile_name || "Unnamed")}</b>
+          ${r.lab_id ? `<span class="tag tag-user">${esc(r.lab_id)}</span>` : ""}
+          <div class="meta">${esc(r.device_name)}${r.simulated ? " · simulated" : ""} ·
+            started ${fmtRunStamp(r.started_at)}${dur ? ` · ran ${dur}` : ""} ·
+            step ${r.step_index + 1}/${r.step_total}
+            ${r.resume_count ? ` · ${r.resume_count} resume${r.resume_count === 1 ? "" : "s"}` : ""}</div>
+        </div>
+        ${runPill(r.status)}
+        <a class="btn btn-sm" href="/api/runs/${encodeURIComponent(r.id)}/report.pdf">PDF report</a>
+      </div>`;
+    }).join("");
+
+    app.innerHTML = `
+      <div class="page view">
+        <div class="page-head">
+          <button class="btn btn-sm" id="back">← All instruments</button>
+          <div style="flex:1">
+            <h2>Run history</h2>
+            <p>Every recorded run on this console, newest first. Each PDF report
+               carries the LAB/LPD number, profile steps, telemetry summary and
+               the full event log.</p>
+          </div>
+          <button class="btn btn-sm" id="refresh">Refresh</button>
+        </div>
+        <div class="prof-list">
+          ${rows || '<div class="empty">No runs recorded yet.</div>'}
+        </div>
+      </div>`;
+    document.getElementById("back").onclick = () => { location.hash = "#/"; };
+    document.getElementById("refresh").onclick = load;
+  }
+
+  async function load() {
+    try {
+      runs = (await api("/api/runs?limit=100")).runs;
+    } catch (e) {
+      toast(e.message, true);
+    }
+    paint();
+  }
+
+  load();
+  return { kind: "history", paint: () => {} };
 }
 
 // ---------------------------------------------------------------------------
@@ -1091,6 +1168,7 @@ function route() {
   if (view && view.teardown) view.teardown();
   const hash = location.hash || "#/";
   if (/^#\/profiles\/?$/.test(hash)) { view = renderProfiles(); return; }
+  if (/^#\/history\/?$/.test(hash)) { view = renderHistory(); return; }
   const m = hash.match(/^#\/device\/([^/]+)(?:\/(profile|graph|qc|log))?$/);
   view = m ? renderControl(decodeURIComponent(m[1]), m[2] || "profile") : renderLanding();
 }

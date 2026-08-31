@@ -66,6 +66,12 @@ Events; the page is a small ES-module SPA under `web/`.
 - **Busy-machine guard** — starting a run on an instrument that is already
   running or holding a target asks for confirmation first and lists exactly what
   it is doing before overriding.
+- **LAB/LPD run ID** — starting a profile requires the operator to type a
+  LAB/LPD number, which is stored with the durable run record, shown on the
+  control screen, and printed in the PDF report header.
+- **Run history** — a console-wide page (`#/history`) lists every recorded run,
+  newest first, with its LAB/LPD number, instrument, duration, step progress and
+  status; any run's PDF report can be downloaded straight from the list.
 - **Power-loss recovery** — every active run is transactionally checkpointed to
   `~/.builtdna/runs.sqlite3`, including its profile, current step/phase, remaining
   hold time, event log, and temperature telemetry. Missing or malformed serial
@@ -77,7 +83,8 @@ Events; the page is a small ES-module SPA under `web/`.
   containing its status, profile steps, interruptions/resumes, telemetry summary,
   sampled temperature trace, and event log. PDF generation uses the standard
   library, so the web console retains its single `pyserial` dependency.
-- **Deep links** — `#/device/<id>/graph`, `/qc` and `/log` address a specific tab.
+- **Deep links** — `#/device/<id>/graph`, `/qc`, `/log`, plus `#/history` and
+  `#/profiles`, address a specific page.
 
 ### Recovery limitations
 

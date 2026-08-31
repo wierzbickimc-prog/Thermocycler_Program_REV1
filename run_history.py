@@ -225,6 +225,17 @@ class RunStore:
                 (device_id,)).fetchone()
         return self._decode_run(row) if row else None
 
+    def list_runs(self, limit=100):
+        """Recent runs, newest first, as slim rows (no profile/steps payload)."""
+        with self._lock:
+            rows = self._db.execute(
+                """SELECT id, device_id, device_name, simulated, profile_name,
+                          lab_id, started_at, ended_at, status, step_index,
+                          step_total, phase, resume_count, interruption_reason
+                   FROM runs ORDER BY started_at DESC, id DESC LIMIT ?""",
+                (int(limit),)).fetchall()
+        return [dict(r) for r in rows]
+
     def get_run(self, run_id, details=False):
         with self._lock:
             row = self._db.execute("SELECT * FROM runs WHERE id=?", (run_id,)).fetchone()

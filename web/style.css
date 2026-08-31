@@ -146,6 +146,7 @@ body {
 .pill-idle { color: var(--ink-soft); background: rgba(255, 255, 255, .07); }
 .pill-off  { color: var(--idle);    background: rgba(255, 255, 255, .05); }
 .pill-err  { color: var(--crit);    background: rgba(232, 85, 109, .14); }
+.pill-ok   { color: var(--ok);      background: rgba(0, 168, 120, .14); }
 @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .28; } }
 
 .card-readouts { display: flex; gap: 22px; margin-top: 14px; }

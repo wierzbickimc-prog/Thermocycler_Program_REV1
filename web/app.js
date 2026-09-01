@@ -694,12 +694,20 @@ function renderControl(id, initialTab = "profile") {
   // hardware the mechanical travel plus end-stop settle can take well over a
   // dozen seconds, far longer than the simulator's 2 s move model, and the
   // telemetry poll itself only refreshes every 1.5 s.
-  async function waitForLid(required, timeoutMs = 30000) {
+  async function waitForLid(required, timeoutMs = 60000) {
     const deadline = Date.now() + timeoutMs;
+    let connectionInterrupted = false;
     while (Date.now() < deadline) {
       const fresh = await api(`/api/device/${encodeURIComponent(id)}`);
-      if (!fresh.connected) throw new Error("Instrument disconnected while moving the lid.");
-      if (fresh.lid_status === required) return true;
+      if (!fresh.connected) {
+        connectionInterrupted = true;
+      } else if (fresh.lid_status === required) {
+        if (connectionInterrupted) {
+          toast(`${fresh.name}: connection was interrupted while moving the lid; ` +
+                `the lid recovered and the profile is starting.`, true);
+        }
+        return true;
+      }
       await new Promise(r => setTimeout(r, 300));
     }
     return false;
